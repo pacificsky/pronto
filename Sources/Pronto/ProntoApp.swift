@@ -11,14 +11,26 @@ struct ProntoApp: App {
             MenuContentView()
                 .environmentObject(controller)
         } label: {
-            // Filled cup when on, outline when off — quick glanceable state.
-            Image(systemName: controller.power.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+            // The menu bar renders this as a monochrome template image (tints are
+            // dropped), so on/off is conveyed by markedly different glyphs:
+            // a full cup when running vs a sleep symbol in standby.
+            Image(systemName: menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
                 .environmentObject(controller)
+        }
+    }
+
+    /// Symbol reflecting the selected machine's power state. Distinct shapes
+    /// (not just fill) so the state reads at a glance in monochrome.
+    private var menuBarSymbol: String {
+        switch controller.power {
+        case .on, .other: return "cup.and.saucer.fill" // running / brewing
+        case .off: return "powersleep"                 // standby
+        case .unknown: return "cup.and.saucer"         // not connected / unknown
         }
     }
 }
