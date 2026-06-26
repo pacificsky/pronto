@@ -2,6 +2,10 @@
 
 **Turn your La Marzocco espresso machine on and off right from your Mac's menu bar.**
 
+<p align="center">
+  <img src="images/pronto_web.png" alt="Pronto's menu-bar popover showing Turn On / Turn Off controls" width="420">
+</p>
+
 Pronto adds a little coffee-cup icon to the top of your screen. Click it to switch
 your machine **on** (so it's warm and ready) or **off** — no need to walk over to
 it or open an app on your phone.
