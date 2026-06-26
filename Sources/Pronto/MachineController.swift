@@ -110,6 +110,9 @@ final class MachineController: ObservableObject {
 
     private func setPower(on: Bool) async {
         guard let client, let serial = selectedSerial, !busy else { return }
+        // Only coffee machines accept the power command; grinders manage their
+        // own standby. The UI hides the buttons, but guard here too.
+        guard selectedMachine?.supportsPower ?? true else { return }
         busy = true
         defer { busy = false }
         do {
