@@ -12,9 +12,18 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # The default toolchain can ship an SDK older than our macOS 14 deployment
+      # target (which broke the build on `openSettings`, a macOS 14.0 API).
+      # Pin the newest Xcode installed on the runner so the SDK is >= 14.
+      - name: Select latest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)/Contents/Developer"
+          swiftc --version
+          xcrun --sdk macosx --show-sdk-version
 
       - name: Build app bundle (ad-hoc signed)
         run: SIGN_IDENTITY=- APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
