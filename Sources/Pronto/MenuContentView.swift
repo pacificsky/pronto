@@ -116,7 +116,7 @@ struct MenuContentView: View {
                     set: { controller.selectMachine($0) }
                 )) {
                     ForEach(controller.machines) { machine in
-                        Text(machine.displayName).tag(machine.serialNumber)
+                        Text("\(machine.displayName) — \(machine.modelName)").tag(machine.serialNumber)
                     }
                 }
                 .pickerStyle(.menu)
