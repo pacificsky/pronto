@@ -76,6 +76,8 @@ struct MenuContentView: View {
               systemImage: "info.circle")
             .font(.caption)
             .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func powerButton(title: String, on: Bool, tint: Color, active: Bool) -> some View {
