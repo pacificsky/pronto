@@ -27,6 +27,9 @@ struct ProntoApp: App {
     /// Symbol reflecting the selected machine's power state. Distinct shapes
     /// (not just fill) so the state reads at a glance in monochrome.
     private var menuBarSymbol: String {
+        // A command is in flight — the menu-bar label is a static template image,
+        // so a real spinner can't animate here; an hourglass reads as "working".
+        if controller.pendingTarget != nil { return "hourglass" }
         switch controller.power {
         case .on, .other: return "cup.and.saucer.fill" // running / brewing
         case .off: return "powersleep"                 // standby

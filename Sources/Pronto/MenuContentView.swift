@@ -28,6 +28,14 @@ struct MenuContentView: View {
                 }
             }
 
+            if let actionError = controller.actionError {
+                Label(actionError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Divider()
             footer
         }
@@ -53,11 +61,17 @@ struct MenuContentView: View {
         }
     }
 
-    private var statusDot: some View {
-        Circle()
-            .fill(statusColor)
-            .frame(width: 12, height: 12)
-            .overlay(Circle().stroke(.black.opacity(0.08)))
+    @ViewBuilder private var statusDot: some View {
+        if controller.pendingTarget != nil {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 12, height: 12)
+        } else {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 12, height: 12)
+                .overlay(Circle().stroke(.black.opacity(0.08)))
+        }
     }
 
     private var controls: some View {
@@ -81,12 +95,14 @@ struct MenuContentView: View {
     }
 
     private func powerButton(title: String, on: Bool, tint: Color, active: Bool) -> some View {
-        Button {
+        // Spinner appears only on the button whose direction is being confirmed.
+        let isPending = controller.pendingTarget == (on ? .on : .off)
+        return Button {
             on ? controller.turnOn() : controller.turnOff()
         } label: {
             HStack {
                 Spacer()
-                if controller.busy {
+                if isPending {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "power")
@@ -162,6 +178,9 @@ struct MenuContentView: View {
     }
 
     private var statusText: String {
+        if let target = controller.pendingTarget {
+            return target.isOn ? "Turning on…" : "Turning off…"
+        }
         let canPower = controller.selectedMachine?.supportsPower ?? true
         switch controller.power {
         case .on: return canPower ? "On — ready to brew" : "On"

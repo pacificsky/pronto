@@ -19,13 +19,25 @@ final class MachineController: ObservableObject {
     @Published var selectedSerial: String?
     @Published private(set) var busy = false
     @Published private(set) var lastRefresh: Date?
+    /// The power state a freshly-issued command is waiting for the cloud to
+    /// confirm. Non-nil while a command is reconciling — the UI shows a pending
+    /// (spinner) state instead of flipping `power` optimistically.
+    @Published private(set) var pendingTarget: PowerState?
+    /// Set when a command couldn't be confirmed within the retry window. Cleared
+    /// when the next command starts.
+    @Published var actionError: String?
 
     private var config = Persistence.loadConfig()
     private var client: LaMarzoccoCloudClient?
     private var pollTask: Task<Void, Never>?
+    private var commandTask: Task<Void, Never>?
     private var booted = false
 
     private static let pollInterval: UInt64 = 30 * 1_000_000_000 // 30s
+    /// Confirmation polling after a power command: start at 3s, +1s each round,
+    /// up to this many rounds (~75s total) before giving up.
+    private static let confirmRetries = 10
+    private static let confirmInitialDelay: UInt64 = 3
 
     var hasCredentials: Bool { config.isComplete }
     var username: String { config.username }
@@ -93,6 +105,10 @@ final class MachineController: ObservableObject {
     }
 
     func signOut() {
+        commandTask?.cancel()
+        commandTask = nil
+        pendingTarget = nil
+        actionError = nil
         stopPolling()
         Persistence.clearAll()
         config = Persistence.loadConfig()
@@ -105,29 +121,77 @@ final class MachineController: ObservableObject {
 
     // MARK: - Commands
 
-    func turnOn() { Task { await setPower(on: true) } }
-    func turnOff() { Task { await setPower(on: false) } }
+    func turnOn() { startCommand(on: true) }
+    func turnOff() { startCommand(on: false) }
+
+    private func startCommand(on: Bool) {
+        commandTask?.cancel()
+        commandTask = Task { [weak self] in await self?.setPower(on: on) }
+    }
 
     private func setPower(on: Bool) async {
         guard let client, let serial = selectedSerial, !busy else { return }
         // Only coffee machines accept the power command; grinders manage their
         // own standby. The UI hides the buttons, but guard here too.
         guard selectedMachine?.supportsPower ?? true else { return }
+        let target: PowerState = on ? .on : .off
+
         busy = true
-        defer { busy = false }
+        actionError = nil
+        pendingTarget = target
+        // Pause background polling so it can't write `power` mid-reconcile.
+        stopPolling()
+        defer {
+            pendingTarget = nil
+            busy = false
+            startPolling()
+        }
+
+        // Issue the command. We do NOT flip `power` optimistically — the menu-bar
+        // glyph and popover show a pending state until the cloud confirms.
         do {
             try await client.setPower(serial: serial, on: on)
-            power = on ? .on : .off // optimistic
-            // Confirm with the server shortly after.
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            await refreshStatus()
         } catch {
             connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
+            return
+        }
+
+        // The cloud dashboard lags the command (machine has to wake and report
+        // back), so poll with linear backoff until it reflects the target.
+        var latest = power
+        var delay = MachineController.confirmInitialDelay
+        for _ in 0..<MachineController.confirmRetries {
+            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+            if Task.isCancelled { return }
+            do {
+                let state = try await client.powerState(serial: serial)
+                latest = state
+                lastRefresh = Date()
+                if state == target {
+                    power = state // confirmed
+                    return
+                }
+            } catch LaMarzoccoError.authenticationFailed {
+                connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
+                return
+            } catch {
+                // Transient blip — keep retrying within the window.
+            }
+            delay += 1
+        }
+
+        // Window exhausted: surface whatever the cloud last reported. If it still
+        // isn't the target, the command didn't take — tell the user.
+        power = latest
+        if latest != target {
+            actionError = "Couldn’t confirm the machine turned \(on ? "on" : "off"). It still reports \(latest == .off ? "standby" : "another state")."
         }
     }
 
     func refreshStatus() async {
         guard let client, let serial = selectedSerial else { return }
+        // Don't let a poll/manual refresh clobber an in-flight command's state.
+        guard pendingTarget == nil else { return }
         do {
             power = try await client.powerState(serial: serial)
             lastRefresh = Date()
