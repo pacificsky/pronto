@@ -58,11 +58,26 @@ EOF
     fi
 
     # Import the private key and certificate as separate PEM items, NOT as a
-    # PKCS#12 bundle. macOS's `security import` rejects the empty-password PKCS#12
-    # that OpenSSL 3 writes ("MAC verification failed during PKCS12 import") and
-    # silently keeps only the cert — dropping the PRIVATE KEY and leaving the
-    # orphan cert that wedged signing. Importing PEMs sidesteps PKCS#12 password
-    # and MAC encoding entirely. -A lets codesign use the key without prompts.
+    # PKCS#12 bundle. macOS's `security import` runs a legacy PKCS#12 decoder
+    # that only implements the *original* PKCS#12 algorithms (SHA-1 MAC, 3DES/RC2
+    # bag encryption). OpenSSL 3 (2021) flipped its defaults to SHA-256 + AES-256,
+    # so a default p12 from `openssl pkcs12 -export` fails to import — and there
+    # are THREE independent ways it fails:
+    #
+    #   1. SHA-256 outer MAC      -> "MAC verification failed during PKCS12 import"
+    #   2. AES-256-CBC bags       -> "Unknown format in import" (after MAC passes)
+    #   3. empty export password  -> MAC mismatch (RFC 7292 leaves empty-password
+    #                                encoding ambiguous; OpenSSL and Apple differ)
+    #
+    # Fixing one surfaces the next, and the catch-all "(wrong password?)" message
+    # hides which is which. The p12 path only works with ALL of: `-legacy` (SHA-1
+    # MAC) + legacy bag encryption + a non-empty `-passout`/`-P` password.
+    #
+    # When the import fails, the cert still lands (via add-trusted-cert below) but
+    # the PRIVATE KEY is dropped -> an orphan cert that's useless for signing.
+    # Importing PEMs skips the PKCS#12 decoder entirely, so none of the above
+    # apply (and there's no `-legacy` flag to depend on, which LibreSSL lacks).
+    # -A lets codesign use the key without per-use prompts.
     if ! security import "$tmp/key.pem" -k "$LOGIN_KEYCHAIN" -T /usr/bin/codesign -A 2>"$tmp/err"; then
         echo "  ⚠︎ Importing the private key into the keychain failed — falling back to ad-hoc:" >&2
         sed 's/^/    /' "$tmp/err" >&2; rm -rf "$tmp"; echo "-"; return
