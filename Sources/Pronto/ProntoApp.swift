@@ -11,14 +11,31 @@ struct ProntoApp: App {
             MenuContentView()
                 .environmentObject(controller)
         } label: {
-            // Filled cup when on, outline when off — quick glanceable state.
-            Image(systemName: controller.power.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+            // Filled + green when on, outline + neutral when off — glanceable at a
+            // glance. The fill/outline difference survives even if the menu bar
+            // templates the tint to monochrome; the color is the bonus signal.
+            Image(systemName: menuBarSymbol)
+                .foregroundStyle(menuBarTint)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
                 .environmentObject(controller)
+        }
+    }
+
+    /// Cup symbol reflecting the selected machine's power state.
+    private var menuBarSymbol: String {
+        controller.power.isOn ? "cup.and.saucer.fill" : "cup.and.saucer"
+    }
+
+    /// Icon tint, mirroring the in-popover status dot.
+    private var menuBarTint: Color {
+        switch controller.power {
+        case .on: return .green
+        case .other: return .yellow
+        case .off, .unknown: return .primary
         }
     }
 }
