@@ -1,64 +1,57 @@
-# Pronto
+# ☕ Pronto
 
-A native macOS menu-bar app to turn a **La Marzocco Linea Micra / Linea Mini**
-(or GS3) espresso machine **on** and **off**, with a settings screen to connect
-your account.
+**Turn your La Marzocco espresso machine on and off right from your Mac's menu bar.**
 
-Built with SwiftUI `MenuBarExtra` — no Dock icon, just a cup in the menu bar.
+Pronto adds a little coffee-cup icon to the top of your screen. Click it to switch
+your machine **on** (so it's warm and ready) or **off** — no need to walk over to
+it or open an app on your phone.
 
-> **Unofficial.** Pronto is not affiliated with, endorsed by, or sponsored by
+Works with the **La Marzocco Linea Micra**, **Linea Mini**, and **GS3**.
+
+---
+
+## Install
+
+1. **[Download the latest version here](https://github.com/pacificsky/pronto/releases/latest)**
+   (grab the file ending in `.zip`).
+2. Open the downloaded file to unzip it, then drag **Pronto** into your
+   **Applications** folder.
+3. The first time you open it, **right-click the Pronto app → Open → Open**.
+   (macOS shows a warning the first time for any app not from the App Store —
+   this is normal and only happens once.)
+4. A coffee-cup icon appears in your menu bar. Click it → **Settings…** and sign
+   in with the **same email and password you use in the official La Marzocco app**.
+
+That's it! Pick your machine and you'll see **Turn On** / **Turn Off** buttons.
+
+## Using Pronto
+
+- Click the cup icon any time to turn your machine on or off.
+- The icon and a little colored dot show whether your machine is currently on.
+- Have more than one machine? Choose which one from the menu.
+
+## Good to know
+
+- **Your Mac needs macOS 14 or newer.**
+- **Your login stays private.** Your La Marzocco email and password are saved
+  securely in your Mac's Keychain and are only ever sent to La Marzocco to
+  control your machine.
+- Pronto talks to your machine through La Marzocco's online service, so your Mac
+  needs an internet connection (it doesn't have to be on the same Wi-Fi as the
+  machine).
+
+---
+
+> **Unofficial app.** Pronto is not affiliated with, endorsed by, or sponsored by
 > La Marzocco S.r.l. "La Marzocco", "Linea Micra", and "Linea Mini" are
-> trademarks of their respective owner, used here only to describe compatibility.
+> trademarks of their respective owner, used here only to describe what Pronto
+> works with.
 
-## How control works
+---
 
-Current La Marzocco firmware no longer exposes the old local HTTP API (port 8081)
-that earlier integrations used over the LAN. Today there are two transports:
-**Bluetooth LE** (truly local) and the **cloud** (`lion.lamarzocco.io`). This app
-uses the **cloud API** — the same path the Home Assistant integration uses as its
-primary channel.
+### For developers
 
-"On" / "Off" map to the machine's mode: `BrewingMode` (on) and `StandBy` (off),
-sent via `POST /things/{serial}/command/CoffeeMachineChangeMode`.
+Want to build it yourself, understand how it works, or publish a new version?
 
-Auth mirrors `pylamarzocco`'s `LaMarzoccoCloudClient`:
-1. Generate a per-install identity (P-256 keypair + a derived 32-byte secret).
-2. Register the public key: `POST /auth/init`.
-3. Sign in with your account: `POST /auth/signin` → access/refresh tokens.
-4. Every request carries a bespoke "request proof" + an ECDSA P-256 signature
-   in `X-*` headers (see `LMCrypto.swift`). This port is verified byte-for-byte
-   against the Python reference.
-
-Credentials and the installation key are stored in the **macOS Keychain**.
-
-## Build & run
-
-```sh
-./make-app.sh            # builds dist/Pronto.app
-open dist/Pronto.app
-```
-
-Then click the cup icon → **Settings…** and enter the email/password from the
-official La Marzocco app. Pick your machine, and the **Turn On / Turn Off**
-buttons appear. Status is polled every 30 seconds.
-
-Requirements: macOS 14+, Xcode/Swift toolchain (developed on Swift 6.3 / macOS 26).
-
-## Source layout
-
-| File | Responsibility |
-|------|----------------|
-| `ProntoApp.swift` | App entry, `MenuBarExtra` + `Settings` scenes, accessory activation |
-| `MenuContentView.swift` | The menu-bar popover (status + power buttons) |
-| `SettingsView.swift` | Credentials + machine selection window |
-| `MachineController.swift` | View-model: connection state, polling, commands |
-| `LMCloudClient.swift` | REST client: auth, list things, dashboard, set power |
-| `LMCrypto.swift` | Installation key, request-proof, signed headers |
-| `Persistence.swift` | Keychain + UserDefaults storage |
-
-## Status / limits
-
-- Power on/off + live status are implemented and the auth crypto is verified.
-- End-to-end testing against the live cloud requires real account credentials
-  (entered by you in Settings) — not exercised in the build pipeline.
-- Steam boiler, temperature, schedules etc. are intentionally out of scope for v1.
+- 🛠️ **[Developer Guide](DEVELOPER-GUIDE.md)** — build from source, architecture, how the La Marzocco connection works.
+- 🚀 **[Release Guide](RELEASE.md)** — how to cut a new release.

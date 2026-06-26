@@ -8,9 +8,13 @@ BUNDLE_ID="blog.pacificsky.pronto"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 
+# Version shown in the bundle. Override for releases, e.g. APP_VERSION=1.2.0.
+APP_VERSION="${APP_VERSION:-1.0}"
+
 # Stable signing identity. Override with SIGN_IDENTITY=... (e.g. a Developer ID)
 # to use your own cert; otherwise we create/reuse a local self-signed one so the
 # code signature stays constant across rebuilds and the Keychain stops prompting.
+# Set SIGN_IDENTITY=- to force a plain ad-hoc signature (used in CI).
 SIGN_IDENTITY="${SIGN_IDENTITY:-Pronto Local Signing}"
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
@@ -83,8 +87,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>      <string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>1.0</string>
-    <key>CFBundleVersion</key>         <string>1</string>
+    <key>CFBundleShortVersionString</key> <string>$APP_VERSION</string>
+    <key>CFBundleVersion</key>         <string>$APP_VERSION</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
@@ -92,9 +96,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-IDENTITY="$(ensure_identity)"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    IDENTITY="-"   # forced ad-hoc (CI / distribution build)
+else
+    IDENTITY="$(ensure_identity)"
+fi
 if [ "$IDENTITY" = "-" ]; then
-    echo "▸ Code-signing (ad-hoc — identity unavailable, Keychain will re-prompt)…"
+    echo "▸ Code-signing (ad-hoc)…"
 else
     echo "▸ Code-signing with '$IDENTITY'…"
 fi
