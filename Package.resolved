@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "angstrom",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pacificsky/angstrom.git",
+      "state" : {
+        "revision" : "4bffe55672d3a0cf9b266c2637065fc4f876ca1f",
+        "version" : "0.1.0"
+      }
+    }
+  ],
+  "version" : 2
+}

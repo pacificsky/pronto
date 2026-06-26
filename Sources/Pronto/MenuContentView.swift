@@ -1,4 +1,5 @@
 import SwiftUI
+import Angstrom
 
 /// The popover shown when the menu-bar icon is clicked.
 struct MenuContentView: View {

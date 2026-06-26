@@ -37,17 +37,22 @@ primary channel.
 "On" / "Off" map to the machine's mode: `BrewingMode` (on) and `StandBy` (off),
 sent via `POST /things/{serial}/command/CoffeeMachineChangeMode`.
 
-Auth mirrors `pylamarzocco`'s `LaMarzoccoCloudClient`:
+The cloud protocol — auth and the machine client — lives in the
+[**Angstrom**](https://github.com/pacificsky/angstrom) Swift package, which Pronto
+depends on (pinned in `Package.resolved`). Angstrom is the standalone extraction of
+the `pylamarzocco` port and does the work:
 
-1. Generate a per-install identity (P-256 keypair + a derived 32-byte secret).
+1. Generate a per-install identity (`InstallationKey`: P-256 keypair + derived secret).
 2. Register the public key: `POST /auth/init`.
 3. Sign in with your account: `POST /auth/signin` → access/refresh tokens.
-4. Every request carries a bespoke "request proof" + an ECDSA P-256 signature
-   in `X-*` headers (see `LMCrypto.swift`). This port is verified byte-for-byte
-   against the Python reference.
+4. Every request carries a bespoke "request proof" + an ECDSA P-256 signature in
+   `X-*` headers. This is verified byte-for-byte against the Python reference in
+   Angstrom's own tests.
 
-Credentials and the installation key are stored in the **macOS Keychain** (one
-consolidated item, read once per launch and cached, keyed by the bundle ID).
+Angstrom does **no** persistence — Pronto owns that. Credentials and the
+`Codable` `InstallationKey` are stored in the **macOS Keychain** (one consolidated
+item, read once per launch and cached, keyed by the bundle ID); the `isRegistered`
+flag lives in `UserDefaults`. Both are passed back into the client on launch.
 
 ## Source layout
 
@@ -56,10 +61,11 @@ consolidated item, read once per launch and cached, keyed by the bundle ID).
 | `ProntoApp.swift` | App entry, `MenuBarExtra` + `Settings` scenes, accessory activation |
 | `MenuContentView.swift` | The menu-bar popover (status + power buttons) |
 | `SettingsView.swift` | Credentials + machine selection window |
-| `MachineController.swift` | View-model: connection state, polling, commands |
-| `LMCloudClient.swift` | REST client: auth, list things, dashboard, set power |
-| `LMCrypto.swift` | Installation key, request-proof, signed headers |
-| `Persistence.swift` | Keychain + UserDefaults storage |
+| `MachineController.swift` | View-model: connection state, polling, commands (drives Angstrom's client) |
+| `Persistence.swift` | Keychain + UserDefaults storage (credentials, `InstallationKey`, `isRegistered`) |
+
+The cloud REST client, auth crypto, and the `Machine`/`PowerState` models come from
+the [Angstrom](https://github.com/pacificsky/angstrom) package.
 
 ## Code signing
 
