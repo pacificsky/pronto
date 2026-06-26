@@ -1,0 +1,46 @@
+name: Release
+
+# Cut a release by pushing a version tag:
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # allow the job to create the GitHub Release
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app bundle (ad-hoc signed)
+        run: SIGN_IDENTITY=- APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
+
+      - name: Zip the .app
+        run: ditto -c -k --keepParent dist/Pronto.app "Pronto-${GITHUB_REF_NAME}.zip"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Install
+
+          1. Download `Pronto-<version>.zip` below and unzip it.
+          2. Move **Pronto.app** to your `/Applications` folder.
+          3. **First launch only:** right-click **Pronto.app** → **Open** → **Open**.
+             (Needed once because the app isn't notarized by Apple. After that it
+             opens normally.)
+          4. Click the cup icon in the menu bar → **Settings…** and sign in with
+             your La Marzocco account.
+
+          ---
+          *Unofficial. Not affiliated with or endorsed by La Marzocco S.r.l.*
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "Pronto-${GITHUB_REF_NAME}.zip" \
+            --title "Pronto $GITHUB_REF_NAME" \
+            --notes-file notes.md
