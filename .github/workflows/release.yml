@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The default toolchain can ship an SDK older than our macOS 14 deployment
       # target (which broke the build on `openSettings`, a macOS 14.0 API).
