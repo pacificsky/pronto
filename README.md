@@ -44,6 +44,17 @@ That's it! Pick your machine and you'll see **Turn On** / **Turn Off** buttons.
   needs an internet connection (it doesn't have to be on the same Wi-Fi as the
   machine).
 
+## Tested on
+
+Pronto has been validated end-to-end on a **Linea Micra** paired with a **Pico**
+grinder.
+
+It *should* work with the other supported machines (**Linea Mini**, **GS3**) and
+grinders, but those haven't been verified on real hardware yet. If you own one,
+please give Pronto a try — and if something doesn't work,
+[open an issue](https://github.com/pacificsky/pronto/issues) with what you saw
+(or send a patch). Your feedback is what makes broader support possible.
+
 ---
 
 > **Unofficial app.** Pronto is not affiliated with, endorsed by, or sponsored by
