@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Angstrom
 
 /// Minimal Keychain wrapper for a single stored blob.
 enum Keychain {
@@ -45,8 +46,11 @@ enum Keychain {
 private struct Secrets: Codable {
     var username = ""
     var password = ""
+    /// Angstrom's per-install identity (Codable). Persisted whole.
+    var installationKey: InstallationKey?
+    // Legacy v2 split fields, kept only to migrate older installs into `installationKey`.
     var installationId = ""
-    var installationKeyRaw = "" // base64
+    var installationKeyRaw = "" // base64 of the raw P-256 scalar
 }
 
 /// Public view of stored configuration.
@@ -124,14 +128,21 @@ enum Persistence {
 
     /// Load the existing installation identity, or generate + persist a new one.
     static func loadOrCreateInstallationKey() -> InstallationKey {
-        if !cache.installationId.isEmpty,
-           let raw = Data(base64Encoded: cache.installationKeyRaw),
-           let key = InstallationKey(installationId: cache.installationId, privateKeyRaw: raw) {
+        if let key = cache.installationKey {
+            return key
+        }
+        // Migrate the legacy split fields (same raw scalar format) so existing
+        // installs keep their registration instead of re-registering.
+        if !cache.installationId.isEmpty, let raw = Data(base64Encoded: cache.installationKeyRaw) {
+            let key = InstallationKey(installationId: cache.installationId, privateKeyRaw: raw)
+            cache.installationKey = key
+            cache.installationId = ""
+            cache.installationKeyRaw = ""
+            persist()
             return key
         }
         let key = InstallationKey.generate()
-        cache.installationId = key.installationId
-        cache.installationKeyRaw = key.privateKeyRaw.base64EncodedString()
+        cache.installationKey = key
         persist()
         defaults.set(false, forKey: Keys.registered) // new key needs registration
         return key

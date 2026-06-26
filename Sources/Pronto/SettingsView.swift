@@ -1,4 +1,5 @@
 import SwiftUI
+import Angstrom
 
 /// Connection settings: La Marzocco account credentials + machine selection.
 struct SettingsView: View {

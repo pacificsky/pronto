@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Angstrom
 
 /// High-level connection state for the UI.
 enum ConnectionState: Equatable {
@@ -20,7 +21,7 @@ final class MachineController: ObservableObject {
     @Published private(set) var lastRefresh: Date?
 
     private var config = Persistence.loadConfig()
-    private var client: LMCloudClient?
+    private var client: LaMarzoccoCloudClient?
     private var pollTask: Task<Void, Never>?
     private var booted = false
 
@@ -53,15 +54,15 @@ final class MachineController: ObservableObject {
         stopPolling()
 
         let key = Persistence.loadOrCreateInstallationKey()
-        let client = LMCloudClient(key: key,
-                                   username: config.username,
-                                   password: config.password,
-                                   registered: Persistence.isRegistered)
+        let client = LaMarzoccoCloudClient(username: config.username,
+                                           password: config.password,
+                                           installationKey: key,
+                                           registered: Persistence.isRegistered)
         self.client = client
 
         do {
             let found = try await client.connect()
-            Persistence.isRegistered = client.registered
+            Persistence.isRegistered = await client.isRegistered
             machines = found
             // Keep a valid selection.
             if selectedSerial == nil || !found.contains(where: { $0.serialNumber == selectedSerial }) {
@@ -72,7 +73,7 @@ final class MachineController: ObservableObject {
             await refreshStatus()
             startPolling()
         } catch {
-            connection = .failed((error as? LMError)?.errorDescription ?? error.localizedDescription)
+            connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
         }
     }
 
@@ -118,7 +119,7 @@ final class MachineController: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             await refreshStatus()
         } catch {
-            connection = .failed((error as? LMError)?.errorDescription ?? error.localizedDescription)
+            connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
         }
     }
 
@@ -128,8 +129,8 @@ final class MachineController: ObservableObject {
             power = try await client.powerState(serial: serial)
             lastRefresh = Date()
             if connection != .connected { connection = .connected }
-        } catch LMError.auth {
-            connection = .failed(LMError.auth.errorDescription ?? "Auth failed")
+        } catch LaMarzoccoError.authenticationFailed {
+            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
         } catch {
             // Transient network blips shouldn't nuke the UI; keep last known state.
         }
