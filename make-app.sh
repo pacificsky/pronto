@@ -20,17 +20,25 @@ LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 # Ensure a usable code-signing identity named "$SIGN_IDENTITY" exists.
 # Echoes the identity to sign with on stdout (falls back to "-" ad-hoc on failure).
+# Diagnostic/progress chatter goes to stderr so it doesn't pollute the captured value.
 ensure_identity() {
-    # Fast path: already a valid code-signing identity.
+    # Fast path: a valid code-signing identity (cert + matching private key) exists.
     if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGN_IDENTITY"; then
         echo "$SIGN_IDENTITY"; return
     fi
 
+    # We have no usable identity. A certificate with this name may still linger
+    # WITHOUT its private key (e.g. a previous run where the key import failed) —
+    # an "orphan" that is useless for signing and blocks recreating the pair.
+    # Remove any such cert so the create step below always starts clean.
+    if security find-certificate -c "$SIGN_IDENTITY" "$LOGIN_KEYCHAIN" >/dev/null 2>&1; then
+        echo "▸ Removing stale '$SIGN_IDENTITY' certificate (no usable private key)…" >&2
+        security delete-certificate -c "$SIGN_IDENTITY" "$LOGIN_KEYCHAIN" >/dev/null 2>&1 || true
+    fi
+
     local tmp; tmp="$(mktemp -d)"
-    # Create the cert+key only if one with this name isn't already present.
-    if ! security find-certificate -c "$SIGN_IDENTITY" "$LOGIN_KEYCHAIN" >/dev/null 2>&1; then
-        echo "▸ Creating self-signed signing identity '$SIGN_IDENTITY'…" >&2
-        cat > "$tmp/req.cfg" <<EOF
+    echo "▸ Creating self-signed signing identity '$SIGN_IDENTITY'…" >&2
+    cat > "$tmp/req.cfg" <<EOF
 [req]
 distinguished_name = dn
 x509_extensions = v3
@@ -42,28 +50,55 @@ basicConstraints = critical, CA:false
 keyUsage = critical, digitalSignature
 extendedKeyUsage = critical, codeSigning
 EOF
-        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-            -keyout "$tmp/key.pem" -out "$tmp/cert.pem" -config "$tmp/req.cfg" >/dev/null 2>&1 || true
-        openssl pkcs12 -export -out "$tmp/id.p12" -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
-            -name "$SIGN_IDENTITY" -passout pass: >/dev/null 2>&1 || true
-        # -A lets codesign use the key without per-use prompts.
-        security import "$tmp/id.p12" -k "$LOGIN_KEYCHAIN" -P "" -T /usr/bin/codesign -A >/dev/null 2>&1 || true
+
+    if ! openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout "$tmp/key.pem" -out "$tmp/cert.pem" -config "$tmp/req.cfg" 2>"$tmp/err"; then
+        echo "  ⚠︎ openssl could not generate the cert/key — falling back to ad-hoc:" >&2
+        sed 's/^/    /' "$tmp/err" >&2; rm -rf "$tmp"; echo "-"; return
     fi
 
-    # If the cert already existed, export it so we can (re)apply trust.
-    if [ ! -f "$tmp/cert.pem" ]; then
-        security find-certificate -c "$SIGN_IDENTITY" -p "$LOGIN_KEYCHAIN" > "$tmp/cert.pem" 2>/dev/null || true
+    # Import the private key and certificate as separate PEM items, NOT as a
+    # PKCS#12 bundle. macOS's `security import` runs a legacy PKCS#12 decoder
+    # that only implements the *original* PKCS#12 algorithms (SHA-1 MAC, 3DES/RC2
+    # bag encryption). OpenSSL 3 (2021) flipped its defaults to SHA-256 + AES-256,
+    # so a default p12 from `openssl pkcs12 -export` fails to import — and there
+    # are THREE independent ways it fails:
+    #
+    #   1. SHA-256 outer MAC      -> "MAC verification failed during PKCS12 import"
+    #   2. AES-256-CBC bags       -> "Unknown format in import" (after MAC passes)
+    #   3. empty export password  -> MAC mismatch (RFC 7292 leaves empty-password
+    #                                encoding ambiguous; OpenSSL and Apple differ)
+    #
+    # Fixing one surfaces the next, and the catch-all "(wrong password?)" message
+    # hides which is which. The p12 path only works with ALL of: `-legacy` (SHA-1
+    # MAC) + legacy bag encryption + a non-empty `-passout`/`-P` password.
+    #
+    # When the import fails, the cert still lands (via add-trusted-cert below) but
+    # the PRIVATE KEY is dropped -> an orphan cert that's useless for signing.
+    # Importing PEMs skips the PKCS#12 decoder entirely, so none of the above
+    # apply (and there's no `-legacy` flag to depend on, which LibreSSL lacks).
+    # -A lets codesign use the key without per-use prompts.
+    if ! security import "$tmp/key.pem" -k "$LOGIN_KEYCHAIN" -T /usr/bin/codesign -A 2>"$tmp/err"; then
+        echo "  ⚠︎ Importing the private key into the keychain failed — falling back to ad-hoc:" >&2
+        sed 's/^/    /' "$tmp/err" >&2; rm -rf "$tmp"; echo "-"; return
+    fi
+    if ! security import "$tmp/cert.pem" -k "$LOGIN_KEYCHAIN" -T /usr/bin/codesign -A 2>"$tmp/err"; then
+        echo "  ⚠︎ Importing the certificate into the keychain failed — falling back to ad-hoc:" >&2
+        sed 's/^/    /' "$tmp/err" >&2; rm -rf "$tmp"; echo "-"; return
     fi
 
     # Trust it for code signing (user-level; macOS prompts for your password once).
     echo "▸ Trusting the identity for code signing (one-time macOS password prompt)…" >&2
-    security add-trusted-cert -r trustRoot -p codeSign -k "$LOGIN_KEYCHAIN" \
-        "$tmp/cert.pem" >/dev/null 2>&1 || true
+    if ! security add-trusted-cert -r trustRoot -p codeSign -k "$LOGIN_KEYCHAIN" "$tmp/cert.pem" 2>"$tmp/err"; then
+        echo "  ⚠︎ Could not add trust settings (signing may still work):" >&2
+        sed 's/^/    /' "$tmp/err" >&2
+    fi
     rm -rf "$tmp"
 
     if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGN_IDENTITY"; then
         echo "$SIGN_IDENTITY"
     else
+        echo "  ⚠︎ '$SIGN_IDENTITY' still isn't a valid signing identity — falling back to ad-hoc." >&2
         echo "-"  # fall back to ad-hoc
     fi
 }
