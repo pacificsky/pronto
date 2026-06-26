@@ -21,7 +21,11 @@ struct MenuContentView: View {
             case .failed(let message):
                 failed(message)
             case .connected:
-                controls
+                if controller.selectedMachine?.supportsPower ?? true {
+                    controls
+                } else {
+                    statusOnlyNote
+                }
             }
 
             Divider()
@@ -63,6 +67,15 @@ struct MenuContentView: View {
             powerButton(title: "Turn Off", on: false,
                         tint: .orange, active: controller.power == .off)
         }
+    }
+
+    /// Shown for devices that report status but can't be powered remotely
+    /// (e.g. grinders). The current state still appears in the header.
+    private var statusOnlyNote: some View {
+        Label("Status only — this device can't be powered on or off remotely.",
+              systemImage: "info.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     private func powerButton(title: String, on: Bool, tint: Color, active: Bool) -> some View {
@@ -147,8 +160,9 @@ struct MenuContentView: View {
     }
 
     private var statusText: String {
+        let canPower = controller.selectedMachine?.supportsPower ?? true
         switch controller.power {
-        case .on: return "On — ready to brew"
+        case .on: return canPower ? "On — ready to brew" : "On"
         case .off: return "Off (standby)"
         case .other(let m): return m
         case .unknown:
