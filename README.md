@@ -31,7 +31,7 @@ That's it! Pick your machine and you'll see **Turn On** / **Turn Off** buttons.
 ## Using Pronto
 
 - Click the cup icon any time to turn your machine on or off.
-- The icon and a little colored dot show whether your machine is currently on.
+- The menu-bar icon changes shape, and a colored dot in the popover shows whether your machine is currently on.
 - Have more than one machine? Choose which one from the menu.
 
 ## Good to know
