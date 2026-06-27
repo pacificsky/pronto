@@ -16,6 +16,44 @@ enum ConnectionState: Equatable {
     case failed(String)
 }
 
+/// One boiler's heating progress, for the popover's warm-up rows.
+///
+/// `readyAt` is the cloud's absolute estimate of when the boiler reaches
+/// temperature (Angstrom's `…Boiler.readyStartTime`), so the ETA stays correct at
+/// render time and refreshes as websocket pushes update the dashboard.
+struct BoilerReadiness: Identifiable {
+    enum Kind { case coffee, steam }
+
+    let kind: Kind
+    let status: BoilerStatus
+    let readyAt: Date?
+
+    var id: Kind { kind }
+    var name: String { kind == .coffee ? "Coffee boiler" : "Steam boiler" }
+    var symbol: String { kind == .coffee ? "cup.and.saucer.fill" : "humidity.fill" }
+
+    /// Whole minutes until `date`, rounded up, or `nil` if it's already past.
+    static func minutes(until date: Date) -> Int? {
+        let seconds = date.timeIntervalSinceNow
+        guard seconds > 0 else { return nil }
+        return max(1, Int((seconds / 60).rounded(.up)))
+    }
+
+    /// Right-aligned status for the row, e.g. `Heating · 4m`, `Ready`.
+    var detail: String {
+        switch status {
+        case .heatingUp:
+            if let m = readyAt.flatMap(Self.minutes(until:)) { return "Heating · \(m)m" }
+            return "Heating up"
+        case .ready: return "Ready"
+        case .standby: return "Standby"
+        case .off: return "Off"
+        case .noWater: return "No water"
+        case .other(let v): return v
+        }
+    }
+}
+
 /// Observable view-model that owns the cloud client and the selected machine's
 /// live state.
 ///
@@ -56,6 +94,35 @@ final class MachineController {
 
     /// Selected machine's power, derived from the live dashboard.
     var power: PowerState { device?.powerState ?? .unknown }
+
+    /// The selected machine's boilers and their heating progress, taken from the
+    /// live dashboard. Empty unless the machine is on (off/standby boilers are
+    /// noise). `setPower` flips `power` to `.on` the moment the mode is
+    /// `BrewingMode`, but the boilers can still be `.heatingUp` for minutes after —
+    /// these rows surface that gap.
+    var boilers: [BoilerReadiness] {
+        guard power == .on, let dash = device?.dashboard else { return [] }
+        var result: [BoilerReadiness] = []
+        if let coffee = dash.coffeeBoiler {
+            result.append(.init(kind: .coffee, status: coffee.status, readyAt: coffee.readyStartTime))
+        }
+        if let steam = dash.steamBoilerLevel {
+            result.append(.init(kind: .steam, status: steam.status, readyAt: steam.readyStartTime))
+        } else if let steam = dash.steamBoilerTemperature {
+            result.append(.init(kind: .steam, status: steam.status, readyAt: steam.readyStartTime))
+        }
+        return result
+    }
+
+    /// On, but at least one boiler is still heating — distinct from fully `.ready`.
+    var isWarmingUp: Bool { boilers.contains { $0.status == .heatingUp } }
+
+    /// Combined "ready in ~N min" for the status line: minutes until the last
+    /// still-heating boiler reaches temperature. `nil` once everything is ready.
+    var readyEtaMinutes: Int? {
+        let latest = boilers.compactMap { $0.status == .heatingUp ? $0.readyAt : nil }.max()
+        return latest.flatMap(BoilerReadiness.minutes(until:))
+    }
 
     /// Whether the live websocket subscription is active. Stays `true` across
     /// transient socket drops (the client auto-reconnects underneath).
