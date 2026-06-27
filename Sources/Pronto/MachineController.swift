@@ -186,20 +186,6 @@ final class MachineController {
         }
     }
 
-    /// Manual one-shot refresh. The websocket normally keeps state current, so
-    /// this just backstops the Refresh button.
-    func refreshStatus() async {
-        guard let device else { return }
-        do {
-            try await device.refreshDashboard()
-            if connection != .connected { connection = .connected }
-        } catch LaMarzoccoError.authenticationFailed {
-            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
-        } catch {
-            // Transient network blips shouldn't nuke the UI; keep last-known state.
-        }
-    }
-
     // MARK: - Live updates
 
     /// Tear down any previous machine and bring the selected one live.

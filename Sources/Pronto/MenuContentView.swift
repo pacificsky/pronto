@@ -196,18 +196,14 @@ struct MenuContentView: View {
                 .pickerStyle(.menu)
             }
 
-            HStack {
-                Button {
-                    Task { await controller.refreshStatus() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+            HStack(spacing: 8) {
+                Button { showSettings() } label: {
+                    Text("Settings…").frame(maxWidth: .infinity)
                 }
-                .disabled(controller.connection != .connected)
 
-                Spacer()
-
-                Button("Settings…") { showSettings() }
-                Button("Quit") { NSApp.terminate(nil) }
+                Button { NSApp.terminate(nil) } label: {
+                    Text("Quit").frame(maxWidth: .infinity)
+                }
             }
             .font(.callout)
         }
