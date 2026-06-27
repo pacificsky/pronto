@@ -58,11 +58,19 @@ by one `@MainActor` view-model.
   The menu-bar icon reflects the selected machine's power via *distinct glyphs*
   (filled cup = on, `powersleep` = standby, outline cup = unknown) — **not** color,
   which the menu bar templates away to monochrome.
-- **`MachineController.swift`** — the brain. `ObservableObject` view-model owning
-  `ConnectionState`, `PowerState`, machine list, and a 30s polling `Task`. It drives
-  Angstrom's `LaMarzoccoCloudClient` (an `actor` — calls are `await`-ed). Power
-  commands are **optimistic** (UI flips immediately, then confirms via a delayed
-  `refreshStatus`). Transient refresh errors are swallowed to keep last-known state;
+- **`MachineController.swift`** — the brain. `@MainActor @Observable` view-model
+  (the Observation framework, not `ObservableObject`) owning `ConnectionState`, the
+  machine list, and the live device. It keeps a shared `LaMarzoccoCloudClient` (an
+  `actor`) for auth + the machine list, and one `AngstromUI.LaMarzoccoMachine`
+  (`device`) for the **selected** serial — rebuilt on selection change. `power` is a
+  computed read of `device.powerState`, so SwiftUI tracks the nested `@Observable`
+  and the menu bar updates live. Status comes from the **websocket**, not polling:
+  `activateMachine()` does one `refreshDashboard()` (a dashboard must exist before
+  `start()` or identity-less pushes are dropped) then `start()`, which self-heals on
+  reconnect. Power commands go through `device.setPower`, which (with the socket up)
+  **awaits the machine's confirmation frame** and throws `commandTimedOut` /
+  `commandFailed` — no more hand-rolled confirmation poll. `pendingTarget` drives the
+  in-flight spinner. Transient refresh errors are swallowed to keep last-known state;
   only `LaMarzoccoError.authenticationFailed` downgrades the connection.
 - **The cloud client + crypto live in the [Angstrom](https://github.com/pacificsky/angstrom)
   package** (dependency `from: "1.0.0"`, pinned in `Package.resolved`), not in this
@@ -71,7 +79,10 @@ by one `@MainActor` view-model.
   `pylamarzocco` in Angstrom's own tests), and the `Machine` / `PowerState` /
   `DeviceType` / `LaMarzoccoError` models. Don't reimplement any of this in Pronto.
   Protocol-level changes (new endpoints, device types, status parsing) belong in
-  Angstrom + a version bump, not here.
+  Angstrom + a version bump, not here. Pronto consumes **two** products from the
+  package: `Angstrom` (the stateless actor + models) and `AngstromUI` (the
+  `@MainActor @Observable` `LaMarzoccoMachine` device layer that merges websocket
+  pushes into a `dashboard` and applies optimistic command updates).
 - **`Persistence.swift`** — Pronto owns all persistence (Angstrom does none). Secrets
   (username, password, the `Codable` `InstallationKey`) are stored as a *single*
   consolidated Keychain item (service = bundle id), read once and cached, to minimize
@@ -80,8 +91,11 @@ by one `@MainActor` view-model.
 - **`MenuContentView.swift` / `SettingsView.swift`** — the popover (status + power
   buttons) and the credentials/machine-selection window. Devices where
   `Machine.supportsPower == false` (grinders) render **status-only**: the power
-  buttons are replaced by a note and `setPower` is guarded. Status is fetched when
-  the popover first appears, so the menu-bar icon shows `.unknown` until then.
+  buttons are replaced by a note and `setPower` is guarded. Views observe the
+  controller via `@Environment(MachineController.self)` (Observation, not
+  `@EnvironmentObject`). The live connection is brought up from `MenuContentView`'s
+  `.task` (`bootstrap()`), so the menu-bar icon shows `.unknown` until the popover
+  first appears; after that the websocket keeps it current.
 
 ## Constraints & scope
 

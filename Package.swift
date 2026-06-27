@@ -13,7 +13,8 @@ let package = Package(
         .executableTarget(
             name: "Pronto",
             dependencies: [
-                .product(name: "Angstrom", package: "angstrom")
+                .product(name: "Angstrom", package: "angstrom"),
+                .product(name: "AngstromUI", package: "angstrom")
             ],
             path: "Sources/Pronto"
         )

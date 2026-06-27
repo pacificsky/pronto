@@ -1,6 +1,7 @@
 import Foundation
-import SwiftUI
+import Observation
 import Angstrom
+import AngstromUI
 
 /// High-level connection state for the UI.
 enum ConnectionState: Equatable {
@@ -10,34 +11,41 @@ enum ConnectionState: Equatable {
     case failed(String)
 }
 
-/// Observable view-model that owns the cloud client and the machine's live state.
+/// Observable view-model that owns the cloud client and the selected machine's
+/// live state.
+///
+/// Status arrives over Angstrom's websocket via `LaMarzoccoMachine` (the
+/// `AngstromUI` device layer), so the UI reflects changes — including ones made
+/// at the machine itself, the official app, or a schedule — without polling.
+/// `power` is derived from the live `dashboard`; reading it through SwiftUI tracks
+/// the nested `@Observable` machine automatically.
 @MainActor
-final class MachineController: ObservableObject {
-    @Published private(set) var connection: ConnectionState = .notConfigured
-    @Published private(set) var power: PowerState = .unknown
-    @Published private(set) var machines: [Machine] = []
-    @Published var selectedSerial: String?
-    @Published private(set) var busy = false
-    @Published private(set) var lastRefresh: Date?
-    /// The power state a freshly-issued command is waiting for the cloud to
-    /// confirm. Non-nil while a command is reconciling — the UI shows a pending
-    /// (spinner) state instead of flipping `power` optimistically.
-    @Published private(set) var pendingTarget: PowerState?
-    /// Set when a command couldn't be confirmed within the retry window. Cleared
-    /// when the next command starts.
-    @Published var actionError: String?
+@Observable
+final class MachineController {
+    private(set) var connection: ConnectionState = .notConfigured
+    private(set) var machines: [Machine] = []
+    private(set) var selectedSerial: String?
+    private(set) var busy = false
+    /// The power state a freshly-issued command is waiting on. Non-nil while a
+    /// command is in flight — the UI shows a pending (spinner) state rather than
+    /// flipping `power` before the cloud confirms.
+    private(set) var pendingTarget: PowerState?
+    /// Set when a command was rejected or couldn't be confirmed. Cleared when the
+    /// next command starts.
+    private(set) var actionError: String?
 
-    private var config = Persistence.loadConfig()
-    private var client: LaMarzoccoCloudClient?
-    private var pollTask: Task<Void, Never>?
-    private var commandTask: Task<Void, Never>?
-    private var booted = false
+    /// The live, observable view of the selected machine. Its `dashboard` is kept
+    /// current by the websocket; `power` is derived from it.
+    private(set) var device: LaMarzoccoMachine?
 
-    private static let pollInterval: UInt64 = 30 * 1_000_000_000 // 30s
-    /// Confirmation polling after a power command: start at 3s, +1s each round,
-    /// up to this many rounds (~75s total) before giving up.
-    private static let confirmRetries = 10
-    private static let confirmInitialDelay: UInt64 = 3
+    @ObservationIgnored private var config = Persistence.loadConfig()
+    @ObservationIgnored private var client: LaMarzoccoCloudClient?
+    @ObservationIgnored private var commandTask: Task<Void, Never>?
+    @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private var booted = false
+
+    /// Selected machine's power, derived from the live dashboard.
+    var power: PowerState { device?.powerState ?? .unknown }
 
     var hasCredentials: Bool { config.isComplete }
     var username: String { config.username }
@@ -59,11 +67,11 @@ final class MachineController: ObservableObject {
         }
     }
 
-    /// (Re)build the client from stored credentials and load machines + status.
+    /// (Re)build the client from stored credentials, load machines, and bring the
+    /// selected machine live.
     func connect() async {
         guard config.isComplete else { connection = .notConfigured; return }
         connection = .connecting
-        stopPolling()
 
         let key = Persistence.loadOrCreateInstallationKey()
         let client = LaMarzoccoCloudClient(username: config.username,
@@ -82,8 +90,7 @@ final class MachineController: ObservableObject {
                 Persistence.saveSelectedSerial(selectedSerial)
             }
             connection = .connected
-            await refreshStatus()
-            startPolling()
+            startLive()
         } catch {
             connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
         }
@@ -99,23 +106,25 @@ final class MachineController: ObservableObject {
     }
 
     func selectMachine(_ serial: String) {
+        guard serial != selectedSerial else { return }
         selectedSerial = serial
         Persistence.saveSelectedSerial(serial)
-        Task { await refreshStatus() }
+        startLive()
     }
 
     func signOut() {
-        commandTask?.cancel()
-        commandTask = nil
+        commandTask?.cancel(); commandTask = nil
+        liveTask?.cancel(); liveTask = nil
+        let previous = device
+        device = nil
+        Task { await previous?.stop() }
         pendingTarget = nil
         actionError = nil
-        stopPolling()
         Persistence.clearAll()
         config = Persistence.loadConfig()
         client = nil
         machines = []
         selectedSerial = nil
-        power = .unknown
         connection = .notConfigured
     }
 
@@ -130,94 +139,87 @@ final class MachineController: ObservableObject {
     }
 
     private func setPower(on: Bool) async {
-        guard let client, let serial = selectedSerial, !busy else { return }
-        // Only coffee machines accept the power command; grinders manage their
-        // own standby. The UI hides the buttons, but guard here too.
-        guard selectedMachine?.supportsPower ?? true else { return }
+        guard let device, let machine = selectedMachine, !busy else { return }
+        // Only coffee machines accept the power command; grinders manage their own
+        // standby. The UI hides the buttons, but guard here too.
+        guard machine.supportsPower else { return }
         let target: PowerState = on ? .on : .off
 
         busy = true
         actionError = nil
         pendingTarget = target
-        // Pause background polling so it can't write `power` mid-reconcile.
-        stopPolling()
         defer {
             pendingTarget = nil
             busy = false
-            startPolling()
         }
 
-        // Issue the command. We do NOT flip `power` optimistically — the menu-bar
-        // glyph and popover show a pending state until the cloud confirms.
+        // With a live websocket the command awaits the machine's confirmation
+        // frame (≤10s) and throws on rejection/timeout; `LaMarzoccoMachine` also
+        // applies an optimistic dashboard update, so `power` reflects the target
+        // on return. With no socket it's fire-and-forget plus the optimistic flip.
         do {
-            try await client.setPower(serial: serial, on: on)
+            try await device.setPower(on: on)
+        } catch LaMarzoccoError.authenticationFailed {
+            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
+        } catch LaMarzoccoError.commandTimedOut {
+            actionError = "Couldn’t confirm the machine turned \(on ? "on" : "off") in time."
+        } catch let LaMarzoccoError.commandFailed(status, _) {
+            actionError = "The machine rejected the \(on ? "on" : "off") command (\(status))."
         } catch {
-            connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
-            return
-        }
-
-        // The cloud dashboard lags the command (machine has to wake and report
-        // back), so poll with linear backoff until it reflects the target.
-        var latest = power
-        var delay = MachineController.confirmInitialDelay
-        for _ in 0..<MachineController.confirmRetries {
-            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
-            if Task.isCancelled { return }
-            do {
-                let state = try await client.powerState(serial: serial)
-                latest = state
-                lastRefresh = Date()
-                if state == target {
-                    power = state // confirmed
-                    return
-                }
-            } catch LaMarzoccoError.authenticationFailed {
-                connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
-                return
-            } catch {
-                // Transient blip — keep retrying within the window.
-            }
-            delay += 1
-        }
-
-        // Window exhausted: surface whatever the cloud last reported. If it still
-        // isn't the target, the command didn't take — tell the user.
-        power = latest
-        if latest != target {
-            actionError = "Couldn’t confirm the machine turned \(on ? "on" : "off"). It still reports \(latest == .off ? "standby" : "another state")."
+            actionError = (error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription
         }
     }
 
+    /// Manual one-shot refresh. The websocket normally keeps state current, so
+    /// this just backstops the Refresh button.
     func refreshStatus() async {
-        guard let client, let serial = selectedSerial else { return }
-        // Don't let a poll/manual refresh clobber an in-flight command's state.
-        guard pendingTarget == nil else { return }
+        guard let device else { return }
         do {
-            power = try await client.powerState(serial: serial)
-            lastRefresh = Date()
+            try await device.refreshDashboard()
             if connection != .connected { connection = .connected }
         } catch LaMarzoccoError.authenticationFailed {
             connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
         } catch {
-            // Transient network blips shouldn't nuke the UI; keep last known state.
+            // Transient network blips shouldn't nuke the UI; keep last-known state.
         }
     }
 
-    // MARK: - Polling
+    // MARK: - Live updates
 
-    private func startPolling() {
-        stopPolling()
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: MachineController.pollInterval)
-                if Task.isCancelled { break }
-                await self?.refreshStatus()
-            }
-        }
+    /// Tear down any previous machine and bring the selected one live.
+    private func startLive() {
+        liveTask?.cancel()
+        liveTask = Task { [weak self] in await self?.activateMachine() }
     }
 
-    private func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+    private func activateMachine() async {
+        let previous = device
+        device = nil
+        await previous?.stop()
+
+        guard let client, let serial = selectedSerial else { return }
+        let machine = LaMarzoccoMachine(serialNumber: serial, client: client)
+        device = machine
+
+        // A dashboard must exist before `start()` or early websocket pushes (which
+        // carry no machine identity) are dropped — so load it once first.
+        do {
+            try await machine.refreshDashboard()
+        } catch LaMarzoccoError.authenticationFailed {
+            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
+            return
+        } catch {
+            // Best-effort: the live socket may still deliver a first update.
+        }
+
+        // A newer selection superseded us while awaiting — don't open a socket.
+        if Task.isCancelled { await machine.stop(); return }
+
+        do {
+            try await machine.start()
+        } catch {
+            // Live updates are best-effort; we already have a one-shot dashboard
+            // and the underlying socket self-heals on reconnect.
+        }
     }
 }

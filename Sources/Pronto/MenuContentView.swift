@@ -3,7 +3,7 @@ import Angstrom
 
 /// The popover shown when the menu-bar icon is clicked.
 struct MenuContentView: View {
-    @EnvironmentObject private var controller: MachineController
+    @Environment(MachineController.self) private var controller
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {

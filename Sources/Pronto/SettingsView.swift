@@ -3,7 +3,7 @@ import Angstrom
 
 /// Connection settings: La Marzocco account credentials + machine selection.
 struct SettingsView: View {
-    @EnvironmentObject private var controller: MachineController
+    @Environment(MachineController.self) private var controller
 
     @State private var email = ""
     @State private var password = ""
