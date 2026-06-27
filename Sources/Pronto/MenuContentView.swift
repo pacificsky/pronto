@@ -56,7 +56,7 @@ struct MenuContentView: View {
             statusDot
                 .padding(.top, 4) // align the dot with the title's cap height
             VStack(alignment: .leading, spacing: 1) {
-                Text(controller.selectedMachine?.displayName ?? "La Marzocco")
+                Text(machineTitle)
                     .font(.headline)
                     .lineLimit(1)
                 Text(statusText)
@@ -76,10 +76,25 @@ struct MenuContentView: View {
                 .controlSize(.small)
                 .frame(width: 12, height: 12)
         } else {
+            // While warming, the dot pulses — motion (not the amber hue, which would
+            // clash with the amber Turn-Off button) signals "actively heating up".
             Circle()
                 .fill(statusColor)
                 .frame(width: 12, height: 12)
                 .overlay(Circle().stroke(.black.opacity(0.08)))
+                .opacity(controller.isWarmingUp && warmPulse ? 0.3 : 1)
+                .onAppear { setWarmPulse(controller.isWarmingUp) }
+                .onChange(of: controller.isWarmingUp) { _, warming in setWarmPulse(warming) }
+        }
+    }
+
+    @State private var warmPulse = false
+
+    private func setWarmPulse(_ warming: Bool) {
+        if warming {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { warmPulse = true }
+        } else {
+            withAnimation(.default) { warmPulse = false }
         }
     }
 
@@ -247,6 +262,16 @@ struct MenuContentView: View {
     private func showSettings() {
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
+    }
+
+    /// Header title. Prefers a user-set machine name, then the friendly model name
+    /// ("Linea Micra") — the cloud often leaves `name` empty, in which case
+    /// `displayName` falls back to the cryptic serial, which we'd rather not headline.
+    private var machineTitle: String {
+        guard let machine = controller.selectedMachine else { return "La Marzocco" }
+        if !machine.name.isEmpty, machine.name != machine.serialNumber { return machine.name }
+        if !machine.modelName.isEmpty { return machine.modelName }
+        return machine.displayName
     }
 
     private var statusText: String {
