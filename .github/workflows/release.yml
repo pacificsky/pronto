@@ -49,7 +49,10 @@ jobs:
           ---
           *Unofficial. Not affiliated with or endorsed by La Marzocco S.r.l.*
           EOF
+          # --generate-notes appends a "What's Changed" section (merged PRs since
+          # the previous release) after the install instructions above.
           gh release create "$GITHUB_REF_NAME" \
             "Pronto-${GITHUB_REF_NAME}.zip" \
             --title "Pronto $GITHUB_REF_NAME" \
-            --notes-file notes.md
+            --notes-file notes.md \
+            --generate-notes
