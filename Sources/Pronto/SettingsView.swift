@@ -10,23 +10,10 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("La Marzocco Account") {
-                TextField("Email", text: $email)
-                    .textContentType(.username)
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
-                Text("The same email and password you use in the official La Marzocco app. Stored in your macOS Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button {
-                    controller.saveCredentials(username: email.trimmingCharacters(in: .whitespaces),
-                                               password: password)
-                } label: {
-                    Text("Save & Connect")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(email.isEmpty || password.isEmpty)
+            if controller.hasCredentials {
+                signedInSection
+            } else {
+                credentialsSection
             }
 
             Section("Status") {
@@ -44,25 +31,52 @@ struct SettingsView: View {
                     }
                 }
             }
-
-            if controller.hasCredentials {
-                Section {
-                    Button(role: .destructive) {
-                        controller.signOut()
-                        email = ""
-                        password = ""
-                    } label: {
-                        Text("Sign Out & Clear Credentials")
-                    }
-                }
-            }
         }
         .formStyle(.columns)
         .padding(20)
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
-        .onAppear {
-            if email.isEmpty { email = controller.username }
+    }
+
+    /// Shown once credentials are stored: the account is read-only here. To change
+    /// the password, sign out and sign back in.
+    @ViewBuilder
+    private var signedInSection: some View {
+        Section("La Marzocco Account") {
+            LabeledContent("Signed in as") {
+                Text(controller.username).textSelection(.enabled)
+            }
+
+            Button(role: .destructive) {
+                controller.signOut()
+                email = ""
+                password = ""
+            } label: {
+                Text("Sign Out & Clear Credentials")
+            }
+        }
+    }
+
+    /// Shown when no credentials are stored (fresh install or after sign-out).
+    @ViewBuilder
+    private var credentialsSection: some View {
+        Section("La Marzocco Account") {
+            TextField("Email", text: $email)
+                .textContentType(.username)
+            SecureField("Password", text: $password)
+                .textContentType(.password)
+            Text("The same email and password you use in the official La Marzocco app. Stored in your macOS Keychain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                controller.saveCredentials(username: email.trimmingCharacters(in: .whitespaces),
+                                           password: password)
+            } label: {
+                Text("Save & Connect")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(email.isEmpty || password.isEmpty)
         }
     }
 
