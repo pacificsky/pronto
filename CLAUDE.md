@@ -100,14 +100,18 @@ by one `@MainActor` view-model.
   consolidated Keychain item (service = bundle id), read once and cached, to minimize
   Keychain prompts. The `isRegistered` flag and other non-secret prefs live in
   UserDefaults. The stored key + flag are passed back into the client on launch.
-- **`MenuContentView.swift` / `SettingsView.swift`** — the popover (status + power
-  buttons) and the credentials/machine-selection window. Devices where
-  `Machine.supportsPower == false` (grinders) render **status-only**: the power
-  buttons are replaced by a note and `setPower` is guarded. Views observe the
-  controller via `@Environment(MachineController.self)` (Observation, not
-  `@EnvironmentObject`). The live connection is brought up from `MenuContentView`'s
-  `.task` (`bootstrap()`), so the menu-bar icon shows `.unknown` until the popover
-  first appears; after that the websocket keeps it current.
+- **`MenuContentView.swift` / `SettingsView.swift`** — the popover (status + a
+  single state-aware power button) and the credentials/machine-selection window. The
+  power button shows the one available action — its label/colour/action follow the
+  current state (`Turn On` sage / `Turn Off` amber / disabled while a command
+  reconciles); current state itself is conveyed by the header dot + status line + the
+  menu-bar glyph, plus a **Live** badge in the header when the websocket subscription
+  is active. Devices where `Machine.supportsPower == false` (grinders) render
+  **status-only**: the button is replaced by a note and `setPower` is guarded. Views
+  observe the controller via `@Environment(MachineController.self)` (Observation, not
+  `@EnvironmentObject`). The live connection is brought up at **launch** (see
+  `AppDelegate`), so the menu-bar icon shows `.unknown` only until the first status
+  arrives; after that the websocket keeps it current.
 
 ## Constraints & scope
 

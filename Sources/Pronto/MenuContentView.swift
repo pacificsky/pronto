@@ -6,6 +6,11 @@ struct MenuContentView: View {
     @Environment(MachineController.self) private var controller
     @Environment(\.openSettings) private var openSettings
 
+    /// Muted action-button tints — a soft sage for "on", a warm amber for "off".
+    /// Mid-toned (not ultra-light pastel) so the white button label stays legible.
+    private static let turnOnTint = Color(red: 0.40, green: 0.62, blue: 0.47)
+    private static let turnOffTint = Color(red: 0.85, green: 0.58, blue: 0.34)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
@@ -46,8 +51,9 @@ struct MenuContentView: View {
     // MARK: Sections
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             statusDot
+                .padding(.top, 4) // align the dot with the title's cap height
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.selectedMachine?.displayName ?? "La Marzocco")
                     .font(.headline)
@@ -56,7 +62,10 @@ struct MenuContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 8)
+            if controller.connection == .connected {
+                liveIndicator
+            }
         }
     }
 
@@ -73,12 +82,70 @@ struct MenuContentView: View {
         }
     }
 
+    /// A single, state-aware power button. The current state is already conveyed by
+    /// the header (dot + status line) and the menu-bar glyph, so this region is
+    /// purely "what can I do next" — the button's label, colour, and action all
+    /// follow `powerAction`.
     private var controls: some View {
-        HStack(spacing: 10) {
-            powerButton(title: "Turn On", on: true,
-                        tint: .green, active: controller.power.isOn)
-            powerButton(title: "Turn Off", on: false,
-                        tint: .orange, active: controller.power == .off)
+        Button {
+            switch powerAction {
+            case .turnOn: controller.turnOn()
+            case .turnOff: controller.turnOff()
+            case .none: break
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Spacer()
+                if controller.pendingTarget != nil {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "power")
+                }
+                Text(powerActionLabel)
+                Spacer()
+            }
+            .fontWeight(.semibold)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(powerActionTint)
+        .disabled(controller.busy || powerAction == .none)
+    }
+
+    private enum PowerAction { case turnOn, turnOff, none }
+
+    /// Maps the current power state to the single sensible action.
+    private var powerAction: PowerAction {
+        if controller.pendingTarget != nil { return .none } // command in flight
+        switch controller.power {
+        case .on: return .turnOff
+        case .off, .other: return .turnOn   // .other (e.g. EcoMode): wake to ready
+        case .unknown: return .none         // state unknown — don't guess a direction
+        }
+    }
+
+    private var powerActionLabel: String {
+        if let target = controller.pendingTarget {
+            return target.isOn ? "Turning On…" : "Turning Off…"
+        }
+        switch powerAction {
+        case .turnOn: return "Turn On"
+        case .turnOff: return "Turn Off"
+        case .none: return "Status Unavailable"
+        }
+    }
+
+    private var powerActionTint: Color {
+        switch powerAction {
+        case .turnOn: return Self.turnOnTint
+        case .turnOff: return Self.turnOffTint
+        case .none:
+            // Keep the target colour while a command reconciles; grey when unknown.
+            if let target = controller.pendingTarget {
+                return target.isOn ? Self.turnOnTint : Self.turnOffTint
+            }
+            return Color.gray.opacity(0.4)
         }
     }
 
@@ -91,29 +158,6 @@ struct MenuContentView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func powerButton(title: String, on: Bool, tint: Color, active: Bool) -> some View {
-        // Spinner appears only on the button whose direction is being confirmed.
-        let isPending = controller.pendingTarget == (on ? .on : .off)
-        return Button {
-            on ? controller.turnOn() : controller.turnOff()
-        } label: {
-            HStack {
-                Spacer()
-                if isPending {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "power")
-                }
-                Text(title)
-                Spacer()
-            }
-            .padding(.vertical, 6)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(active ? tint : Color.secondary.opacity(0.5))
-        .disabled(controller.busy || active)
     }
 
     private var notConfigured: some View {
@@ -159,10 +203,6 @@ struct MenuContentView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(controller.connection != .connected)
-
-                if controller.connection == .connected {
-                    liveIndicator
-                }
 
                 Spacer()
 
