@@ -71,7 +71,19 @@ by one `@MainActor` view-model.
   **awaits the machine's confirmation frame** and throws `commandTimedOut` /
   `commandFailed` — no more hand-rolled confirmation poll. `pendingTarget` drives the
   in-flight spinner. Transient refresh errors are swallowed to keep last-known state;
-  only `LaMarzoccoError.authenticationFailed` downgrades the connection.
+  only `LaMarzoccoError.authenticationFailed` downgrades the connection. The
+  connection is owned by `MachineController.shared` and brought up at **launch** from
+  `AppDelegate.applicationDidFinishLaunching` — its lifetime is the app's, not the
+  popover's.
+- **Verifying the live socket.** It does **not** show up in `lsof -iTCP`: the cloud
+  host is behind CloudFront and the connection rides QUIC / Network.framework, not a
+  classic TCP socket FD — so `lsof` is a false negative, not a bug. To confirm it's
+  live, use the in-app **Live** badge in the popover footer (`controller.isLive`),
+  watch `nettop -p "$(pgrep -x Pronto)"` for the ~15s STOMP heartbeat ticking up
+  `bytes_out`, or stream the logs: the client log handler + lifecycle events go to
+  `os.Logger` under subsystem `blog.pacificsky.pronto`
+  (`log stream --predicate 'subsystem == "blog.pacificsky.pronto"'`, or Console.app
+  with *Include Info Messages* on).
 - **The cloud client + crypto live in the [Angstrom](https://github.com/pacificsky/angstrom)
   package** (dependency `from: "1.0.0"`, pinned in `Package.resolved`), not in this
   repo. It owns the REST flow (register → sign in → per-request-signed calls), the
