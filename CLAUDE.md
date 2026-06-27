@@ -65,7 +65,7 @@ by one `@MainActor` view-model.
   `refreshStatus`). Transient refresh errors are swallowed to keep last-known state;
   only `LaMarzoccoError.authenticationFailed` downgrades the connection.
 - **The cloud client + crypto live in the [Angstrom](https://github.com/pacificsky/angstrom)
-  package** (dependency `from: "0.2.0"`, pinned in `Package.resolved`), not in this
+  package** (dependency `from: "1.0.0"`, pinned in `Package.resolved`), not in this
   repo. It owns the REST flow (register → sign in → per-request-signed calls), the
   auth crypto (`InstallationKey`, P-256 proof — verified byte-for-byte against
   `pylamarzocco` in Angstrom's own tests), and the `Machine` / `PowerState` /
