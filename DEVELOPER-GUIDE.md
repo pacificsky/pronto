@@ -41,15 +41,11 @@ sent via `POST /things/{serial}/command/CoffeeMachineChangeMode`.
 
 The cloud protocol — auth and the machine client — lives in the
 [**Angstrom**](https://github.com/pacificsky/angstrom) Swift package, which Pronto
-depends on (pinned to **1.0.0** in `Package.resolved`). Angstrom is the standalone
-extraction of the `pylamarzocco` port and does the work:
-
-1. Generate a per-install identity (`InstallationKey`: P-256 keypair + derived secret).
-2. Register the public key: `POST /auth/init`.
-3. Sign in with your account: `POST /auth/signin` → access/refresh tokens.
-4. Every request carries a bespoke "request proof" + an ECDSA P-256 signature in
-   `X-*` headers. This is verified byte-for-byte against the Python reference in
-   Angstrom's own tests.
+depends on (pinned to **1.0.0** in `Package.resolved`). Angstrom owns the entire
+wire protocol: it generates a per-install identity (`InstallationKey`), registers
+it, signs in, and signs every request — so Pronto only ever calls `client.connect()`
+plus the typed read/command methods. The endpoint shapes, the auth crypto, and how
+they're validated are documented and tested **in Angstrom**, not restated here.
 
 Pronto consumes **two** products from the package:
 
@@ -129,6 +125,8 @@ on first launch (right-click → Open). Two tracked follow-ups:
 
 ## Credits
 
-The La Marzocco cloud protocol and authentication were derived from
-[`pylamarzocco`](https://github.com/zweckj/pylamarzocco) (the library behind the
-Home Assistant integration). Pronto is an independent reimplementation in Swift.
+Pronto reaches the cloud entirely through the
+[Angstrom](https://github.com/pacificsky/angstrom) package — see its README for the
+protocol's origins and credits. (Angstrom is an independent Swift port of the cloud
+protocol from [`pylamarzocco`](https://github.com/zweckj/pylamarzocco), the library
+behind the Home Assistant integration.)
