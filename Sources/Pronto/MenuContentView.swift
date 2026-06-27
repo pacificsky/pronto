@@ -41,7 +41,6 @@ struct MenuContentView: View {
         }
         .padding(14)
         .frame(width: 280)
-        .task { controller.bootstrap() }
     }
 
     // MARK: Sections
@@ -161,6 +160,10 @@ struct MenuContentView: View {
                 }
                 .disabled(controller.connection != .connected)
 
+                if controller.connection == .connected {
+                    liveIndicator
+                }
+
                 Spacer()
 
                 Button("Settings…") { showSettings() }
@@ -168,6 +171,18 @@ struct MenuContentView: View {
             }
             .font(.callout)
         }
+    }
+
+    /// Small live-connection badge: filled bolt when the websocket subscription is
+    /// active, a dimmed slashed bolt while it's only REST (e.g. socket couldn't open).
+    private var liveIndicator: some View {
+        Label(controller.isLive ? "Live" : "Polling",
+              systemImage: controller.isLive ? "bolt.horizontal.fill" : "bolt.horizontal")
+            .font(.caption2)
+            .foregroundStyle(controller.isLive ? .green : .secondary)
+            .help(controller.isLive
+                  ? "Live updates over websocket are active."
+                  : "Not receiving live updates; showing last fetched status.")
     }
 
     // MARK: Helpers

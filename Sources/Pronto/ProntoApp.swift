@@ -4,7 +4,7 @@ import AppKit
 @main
 struct ProntoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var controller = MachineController()
+    @State private var controller = MachineController.shared
 
     var body: some Scene {
         MenuBarExtra {
@@ -42,5 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Pure menu-bar agent: no Dock icon.
         NSApp.setActivationPolicy(.accessory)
+        // Bring the cloud connection (and live websocket) up at launch and keep it
+        // for the app's lifetime — not gated on the popover appearing.
+        MainActor.assumeIsolated { MachineController.shared.bootstrap() }
     }
 }

@@ -1,7 +1,12 @@
 import Foundation
 import Observation
+import OSLog
 import Angstrom
 import AngstromUI
+
+/// Unified-logging channel for the cloud client + live connection. View it with
+/// `log stream --predicate 'subsystem == "blog.pacificsky.pronto"'` or Console.app.
+private let log = Logger(subsystem: "blog.pacificsky.pronto", category: "lamarzocco")
 
 /// High-level connection state for the UI.
 enum ConnectionState: Equatable {
@@ -22,6 +27,11 @@ enum ConnectionState: Equatable {
 @MainActor
 @Observable
 final class MachineController {
+    /// App-wide instance, brought up at launch by the `AppDelegate` and shared
+    /// with the SwiftUI scenes — so the connection's lifetime is the app's, not
+    /// the popover's.
+    static let shared = MachineController()
+
     private(set) var connection: ConnectionState = .notConfigured
     private(set) var machines: [Machine] = []
     private(set) var selectedSerial: String?
@@ -46,6 +56,10 @@ final class MachineController {
 
     /// Selected machine's power, derived from the live dashboard.
     var power: PowerState { device?.powerState ?? .unknown }
+
+    /// Whether the live websocket subscription is active. Stays `true` across
+    /// transient socket drops (the client auto-reconnects underneath).
+    var isLive: Bool { device?.isLive ?? false }
 
     var hasCredentials: Bool { config.isComplete }
     var username: String { config.username }
@@ -77,7 +91,8 @@ final class MachineController {
         let client = LaMarzoccoCloudClient(username: config.username,
                                            password: config.password,
                                            installationKey: key,
-                                           registered: Persistence.isRegistered)
+                                           registered: Persistence.isRegistered,
+                                           logHandler: { msg in log.info("\(msg, privacy: .public)") })
         self.client = client
 
         do {
@@ -92,6 +107,7 @@ final class MachineController {
             connection = .connected
             startLive()
         } catch {
+            log.error("connect failed: \(error.localizedDescription, privacy: .public)")
             connection = .failed((error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription)
         }
     }
@@ -217,7 +233,9 @@ final class MachineController {
 
         do {
             try await machine.start()
+            log.notice("live websocket up for \(serial, privacy: .public)")
         } catch {
+            log.error("websocket start failed: \(error.localizedDescription, privacy: .public)")
             // Live updates are best-effort; we already have a one-shot dashboard
             // and the underlying socket self-heals on reconnect.
         }
