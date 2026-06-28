@@ -27,6 +27,7 @@ struct MenuContentView: View {
                 failed(message)
             case .connected:
                 if controller.selectedMachine?.supportsPower ?? true {
+                    if !controller.boilers.isEmpty { boilerSection }
                     controls
                 } else {
                     statusOnlyNote
@@ -55,7 +56,7 @@ struct MenuContentView: View {
             statusDot
                 .padding(.top, 4) // align the dot with the title's cap height
             VStack(alignment: .leading, spacing: 1) {
-                Text(controller.selectedMachine?.displayName ?? "La Marzocco")
+                Text(machineTitle)
                     .font(.headline)
                     .lineLimit(1)
                 Text(statusText)
@@ -75,10 +76,45 @@ struct MenuContentView: View {
                 .controlSize(.small)
                 .frame(width: 12, height: 12)
         } else {
+            // While warming, the dot pulses — motion (not the amber hue, which would
+            // clash with the amber Turn-Off button) signals "actively heating up".
             Circle()
                 .fill(statusColor)
                 .frame(width: 12, height: 12)
                 .overlay(Circle().stroke(.black.opacity(0.08)))
+                .opacity(controller.isWarmingUp && warmPulse ? 0.3 : 1)
+                .onAppear { setWarmPulse(controller.isWarmingUp) }
+                .onChange(of: controller.isWarmingUp) { _, warming in setWarmPulse(warming) }
+        }
+    }
+
+    @State private var warmPulse = false
+
+    private func setWarmPulse(_ warming: Bool) {
+        if warming {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { warmPulse = true }
+        } else {
+            withAnimation(.default) { warmPulse = false }
+        }
+    }
+
+    /// Per-boiler warm-up rows, shown while the machine is on. Each row names a
+    /// boiler with its heating state and a rough ETA (`Heating · 4m`) or `Ready`,
+    /// so "on" no longer reads as "ready to brew" the instant power flips.
+    private var boilerSection: some View {
+        VStack(spacing: 6) {
+            ForEach(controller.boilers) { boiler in
+                HStack(spacing: 8) {
+                    Image(systemName: boiler.symbol)
+                        .frame(width: 16)
+                        .foregroundStyle(.secondary)
+                    Text(boiler.name)
+                    Spacer(minLength: 8)
+                    Text(boiler.detail)
+                        .foregroundStyle(boiler.status == .ready ? Color.green : Color.secondary)
+                }
+                .font(.caption)
+            }
         }
     }
 
@@ -228,13 +264,29 @@ struct MenuContentView: View {
         openSettings()
     }
 
+    /// Header title. Prefers a user-set machine name, then the friendly model name
+    /// ("Linea Micra") — the cloud often leaves `name` empty, in which case
+    /// `displayName` falls back to the cryptic serial, which we'd rather not headline.
+    private var machineTitle: String {
+        guard let machine = controller.selectedMachine else { return "La Marzocco" }
+        if !machine.name.isEmpty, machine.name != machine.serialNumber { return machine.name }
+        if !machine.modelName.isEmpty { return machine.modelName }
+        return machine.displayName
+    }
+
     private var statusText: String {
         if let target = controller.pendingTarget {
             return target.isOn ? "Turning on…" : "Turning off…"
         }
         let canPower = controller.selectedMachine?.supportsPower ?? true
         switch controller.power {
-        case .on: return canPower ? "On — ready to brew" : "On"
+        case .on:
+            guard canPower else { return "On" }
+            if controller.isWarmingUp {
+                if let eta = controller.readyEtaMinutes { return "Heating up — ready in ~\(eta) min" }
+                return "Heating up…"
+            }
+            return "On — ready to brew"
         case .off: return "Off (standby)"
         case .other(let m): return m
         case .unknown:
@@ -244,7 +296,7 @@ struct MenuContentView: View {
 
     private var statusColor: Color {
         switch controller.power {
-        case .on: return .green
+        case .on: return controller.isWarmingUp ? .orange : .green
         case .off: return .secondary
         case .other: return .yellow
         case .unknown: return .red.opacity(0.6)
