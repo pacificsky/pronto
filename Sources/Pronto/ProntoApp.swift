@@ -12,8 +12,9 @@ struct ProntoApp: App {
                 .environment(controller)
         } label: {
             // The menu bar renders this as a monochrome template image (tints are
-            // dropped), so on/off is conveyed by markedly different glyphs:
-            // a full cup when running vs a sleep symbol in standby.
+            // dropped), so state is conveyed by markedly different glyphs:
+            // a full cup when ready, a thermometer while heating, a sleep symbol
+            // in standby.
             Image(systemName: menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
@@ -30,8 +31,11 @@ struct ProntoApp: App {
         // A command is in flight — the menu-bar label is a static template image,
         // so a real spinner can't animate here; an hourglass reads as "working".
         if controller.pendingTarget != nil { return "hourglass" }
+        // On but still heating — a thermometer reads as "warming up" in monochrome,
+        // distinct from the filled cup that means ready-to-brew.
+        if controller.isWarmingUp { return "thermometer.medium" }
         switch controller.power {
-        case .on, .other: return "cup.and.saucer.fill" // running / brewing
+        case .on, .other: return "cup.and.saucer.fill" // running / ready
         case .off: return "powersleep"                 // standby
         case .unknown: return "cup.and.saucer"         // not connected / unknown
         }
