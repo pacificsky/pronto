@@ -141,11 +141,30 @@ final class MachineController {
         guard !booted else { return }
         booted = true
         selectedSerial = config.selectedSerial
+        registerSensitiveDataForScrubbing()
         if config.isComplete {
             Task { await connect() }
         } else {
             connection = .notConfigured
         }
+    }
+
+    /// Feed the account email and machine serials/names to the Sentry scrubber so
+    /// they're redacted from any crash report. Always called (cheap, and harmless
+    /// when reporting is off) so the literals are present if the user opts in
+    /// later. See ``SensitiveDataScrubber``.
+    private func registerSensitiveDataForScrubbing() {
+        var values: [String?] = [config.username]
+        values += machines.map(\.serialNumber)
+        values += machines.map(\.displayName)
+        SensitiveDataScrubber.shared.register(values)
+    }
+
+    /// Whether the user has opted in to anonymous crash reporting (Settings).
+    /// Toggling starts/stops Sentry immediately — see ``CrashReporting``.
+    var crashReportingEnabled: Bool {
+        get { Persistence.crashReportingEnabled }
+        set { CrashReporting.setEnabled(newValue) }
     }
 
     /// (Re)build the client from stored credentials, load machines, and bring the
@@ -166,6 +185,7 @@ final class MachineController {
             let found = try await client.connect()
             Persistence.isRegistered = await client.isRegistered
             machines = found
+            registerSensitiveDataForScrubbing()
             // Keep a valid selection.
             if selectedSerial == nil || !found.contains(where: { $0.serialNumber == selectedSerial }) {
                 selectedSerial = found.first?.serialNumber
@@ -185,6 +205,7 @@ final class MachineController {
         config.username = username
         config.password = password
         Persistence.saveCredentials(username: username, password: password)
+        registerSensitiveDataForScrubbing()
         Task { await connect() }
     }
 
@@ -209,6 +230,7 @@ final class MachineController {
         machines = []
         selectedSerial = nil
         connection = .notConfigured
+        SensitiveDataScrubber.shared.reset()
     }
 
     // MARK: - Commands

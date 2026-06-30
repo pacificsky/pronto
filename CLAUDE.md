@@ -19,10 +19,11 @@ swift build -c release     # what make-app.sh wraps
 ```
 
 `make-app.sh` is the real build entry point — `swift build` alone produces a bare
-binary with no `Info.plist` (so no `LSUIElement`, no menu-bar behavior). There are
-no tests and no linter configured; CI (`.github/workflows/ci.yml`) only runs
-`swift build` on `macos-15` after selecting the newest installed Xcode (the SDK
-must match the macOS 14 deployment target — some APIs like `openSettings` are 14.0).
+binary with no `Info.plist` (so no `LSUIElement`, no menu-bar behavior). The only
+tests are `Tests/ProntoTests` (the Sentry scrubber's privacy guarantee); no linter
+is configured. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on
+`macos-15` after selecting the newest installed Xcode (the SDK must match the macOS
+14 deployment target — some APIs like `openSettings` are 14.0).
 
 ## Code signing (important — affects Keychain prompts)
 
@@ -100,6 +101,21 @@ by one `@MainActor` view-model.
   consolidated Keychain item (service = bundle id), read once and cached, to minimize
   Keychain prompts. The `isRegistered` flag and other non-secret prefs live in
   UserDefaults. The stored key + flag are passed back into the client on launch.
+- **`CrashReporting.swift` / `SensitiveDataScrubber.swift`** — opt-in crash
+  reporting via Sentry (dependency `sentry-cocoa`), wired so **no user-private data
+  ever leaves the device**. Three layers: (1) start `SentrySDK` only when the user
+  opts in (Settings toggle, defaults **off**, persisted in UserDefaults) *and* a DSN
+  is baked into the bundle — `make-app.sh` writes `SentryDSN` from the `SENTRY_DSN`
+  env var (a repo secret in release CI), so dev builds ship empty → Sentry never
+  initializes; (2) the `SentryOptions` disable every collector that gathers private
+  data (network breadcrumbs / tracking / failed-request capture all carry the
+  serial-bearing LM URLs; swizzling off); (3) `beforeSend`/`beforeBreadcrumb` route
+  everything through `SensitiveDataScrubber`, which redacts the account email and
+  machine serials/names by both registered literal (fed from `MachineController`) and
+  regex pattern, and drops `user`/`request`/`serverName`. The guarantee is proven by
+  `Tests/ProntoTests` (the repo's only test target; CI runs `swift test`), which seeds
+  an event with private data in every field and asserts none survives. Never set a
+  Sentry user or put secrets in log/error/breadcrumb messages.
 - **`MenuContentView.swift` / `SettingsView.swift`** — the popover (status + a
   single state-aware power button) and the credentials/machine-selection window. The
   power button shows the one available action — its label/colour/action follow the

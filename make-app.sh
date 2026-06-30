@@ -16,6 +16,11 @@ APP="$DIST/$APP_NAME.app"
 APP_VERSION="${APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')}"
 APP_VERSION="${APP_VERSION:-0.0.0-unknown}"
 
+# Sentry DSN, baked into the bundle for opt-in crash reporting. Empty by default,
+# so local/dev builds ship no DSN and crash reporting never initializes (see
+# CrashReporting.swift). Release CI injects it from a repository secret.
+SENTRY_DSN="${SENTRY_DSN:-}"
+
 # Stable signing identity. Override with SIGN_IDENTITY=... (e.g. a Developer ID)
 # to use your own cert; otherwise we create/reuse a local self-signed one so the
 # code signature stays constant across rebuilds and the Keychain stops prompting.
@@ -129,6 +134,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>         <string>$APP_VERSION</string>
+    <key>SentryDSN</key>               <string>$SENTRY_DSN</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>

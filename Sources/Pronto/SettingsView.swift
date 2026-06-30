@@ -32,6 +32,8 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                privacySection
             }
             .formStyle(.columns)
 
@@ -40,6 +42,21 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Opt-in, anonymous crash reporting. Defaults off. The caption states the
+    /// privacy guarantee that `SensitiveDataScrubber` enforces.
+    @ViewBuilder
+    private var privacySection: some View {
+        Section("Privacy") {
+            Toggle("Send anonymous crash reports", isOn: Binding(
+                get: { controller.crashReportingEnabled },
+                set: { controller.crashReportingEnabled = $0 }
+            ))
+            Text("Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// App version footer so users can see (and copy, for bug reports) exactly
