@@ -9,33 +9,51 @@ struct SettingsView: View {
     @State private var password = ""
 
     var body: some View {
-        Form {
-            if controller.hasCredentials {
-                signedInSection
-            } else {
-                credentialsSection
-            }
-
-            Section("Status") {
-                LabeledContent("Connection") {
-                    connectionLabel
+        VStack(spacing: 12) {
+            Form {
+                if controller.hasCredentials {
+                    signedInSection
+                } else {
+                    credentialsSection
                 }
-                if !controller.machines.isEmpty {
-                    Picker("Machine", selection: Binding(
-                        get: { controller.selectedSerial ?? "" },
-                        set: { controller.selectMachine($0) }
-                    )) {
-                        ForEach(controller.machines) { machine in
-                            Text("\(machine.displayName) — \(machine.modelName)").tag(machine.serialNumber)
+
+                Section("Status") {
+                    LabeledContent("Connection") {
+                        connectionLabel
+                    }
+                    if !controller.machines.isEmpty {
+                        Picker("Machine", selection: Binding(
+                            get: { controller.selectedSerial ?? "" },
+                            set: { controller.selectMachine($0) }
+                        )) {
+                            ForEach(controller.machines) { machine in
+                                Text("\(machine.displayName) — \(machine.modelName)").tag(machine.serialNumber)
+                            }
                         }
                     }
                 }
             }
+            .formStyle(.columns)
+
+            versionFooter
         }
-        .formStyle(.columns)
         .padding(20)
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// App version footer so users can see (and copy, for bug reports) exactly
+    /// which build they're on. Reads `CFBundleShortVersionString`, which
+    /// `make-app.sh` derives from the git tag (e.g. "0.4.0").
+    @ViewBuilder
+    private var versionFooter: some View {
+        let info = Bundle.main.infoDictionary
+        let version = (info?["CFBundleShortVersionString"] as? String) ?? "unknown"
+        Text("Pronto \(version)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 
     /// Shown once credentials are stored: the account is read-only here. To change
