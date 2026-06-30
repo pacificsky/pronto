@@ -26,6 +26,10 @@ jobs:
           xcrun --sdk macosx --show-sdk-version
 
       - name: Build app bundle (ad-hoc signed)
+        env:
+          # Baked into the bundle for opt-in crash reporting. Empty if the secret
+          # isn't set, in which case crash reporting stays disabled in the build.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: SIGN_IDENTITY=- APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
 
       - name: Zip the .app

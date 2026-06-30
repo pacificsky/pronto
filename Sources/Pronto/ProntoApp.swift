@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Pure menu-bar agent: no Dock icon.
         NSApp.setActivationPolicy(.accessory)
+        // Install the crash handler first (if the user opted in) so a crash during
+        // bootstrap is still caught. No-op when reporting is off or no DSN is baked
+        // into the build.
+        CrashReporting.startIfEnabled()
         // Bring the cloud connection (and live websocket) up at launch and keep it
         // for the app's lifetime — not gated on the popover appearing.
         MainActor.assumeIsolated { MachineController.shared.bootstrap() }

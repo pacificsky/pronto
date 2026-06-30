@@ -74,6 +74,7 @@ enum Persistence {
         static let selectedSerial = "selectedSerial"
         static let registered = "installationRegistered"
         static let migratedV2 = "secretsConsolidatedV2"
+        static let crashReporting = "crashReportingEnabled"
     }
 
     /// In-memory cache so we read the Keychain only once per launch.
@@ -151,5 +152,14 @@ enum Persistence {
     static var isRegistered: Bool {
         get { defaults.bool(forKey: Keys.registered) }
         set { defaults.set(newValue, forKey: Keys.registered) }
+    }
+
+    // MARK: Preferences
+
+    /// Opt-in crash reporting. Defaults to `false` — Sentry stays off until the
+    /// user explicitly enables it in Settings.
+    static var crashReportingEnabled: Bool {
+        get { defaults.bool(forKey: Keys.crashReporting) }
+        set { defaults.set(newValue, forKey: Keys.crashReporting) }
     }
 }
