@@ -8,8 +8,13 @@ BUNDLE_ID="blog.pacificsky.pronto"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 
-# Version shown in the bundle. Override for releases, e.g. APP_VERSION=1.2.0.
-APP_VERSION="${APP_VERSION:-1.0}"
+# Version shown in the bundle. Release CI sets this explicitly from the tag
+# (APP_VERSION=1.2.0). Otherwise derive it from git so a local build reflects
+# the last released tag — exact (e.g. 0.4.0) when built on a tag, or
+# 0.4.0-3-gabc1234[-dirty] when ahead of / dirty against it. Falls back to
+# 0.0.0-unknown outside a git checkout.
+APP_VERSION="${APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')}"
+APP_VERSION="${APP_VERSION:-0.0.0-unknown}"
 
 # Stable signing identity. Override with SIGN_IDENTITY=... (e.g. a Developer ID)
 # to use your own cert; otherwise we create/reuse a local self-signed one so the
