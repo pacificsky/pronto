@@ -7,7 +7,7 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/pacificsky/angstrom.git", from: "1.0.0")
+        .package(url: "https://github.com/pacificsky/angstrom.git", from: "1.1.0")
     ],
     targets: [
         .executableTarget(
