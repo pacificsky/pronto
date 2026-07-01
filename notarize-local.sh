@@ -109,7 +109,7 @@ if [ "$status" != "Accepted" ]; then
 fi
 
 # --- Staple + package -------------------------------------------------------
-echo "▸ Stapling the ticket into $APP…"
+echo "▸ Stapling the ticket into ${APP}…"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 
