@@ -31,8 +31,10 @@ APP="$DIST/$APP_NAME.app"
 # make-app.sh applies the hardened runtime + secure timestamp for any "Developer
 # ID …" identity (both are notarization requirements).
 if [ -z "${SIGN_IDENTITY:-}" ]; then
-    SIGN_IDENTITY="$(security find-identity -v -p codesigning \
-        | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+    # Capture first, then match: `security … | grep | head` would SIGPIPE the
+    # producers when head/grep exit early, failing under `set -o pipefail`.
+    ids="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    SIGN_IDENTITY="$(grep -m1 'Developer ID Application' <<<"$ids" | sed -E 's/.*"(.*)"/\1/')"
 fi
 if [ -z "$SIGN_IDENTITY" ]; then
     echo "✗ No 'Developer ID Application' identity found in your keychain." >&2
@@ -67,8 +69,11 @@ else
 fi
 
 # Sanity-check the signature carries the hardened runtime (flag 'runtime') before we
-# waste a notary round-trip on a bundle Apple will reject.
-if ! codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'flags=.*runtime'; then
+# waste a notary round-trip on a bundle Apple will reject. Capture the output and match
+# in-shell — piping into `grep -q` would SIGPIPE codesign mid-write, which under
+# `set -o pipefail` makes the pipeline fail even on a match (false negative).
+sig="$(codesign -dv --verbose=4 "$APP" 2>&1 || true)"
+if [[ "$sig" != *runtime* ]]; then
     echo "✗ $APP is not signed with the hardened runtime — notarization would be rejected." >&2
     echo "  Ensure it was signed with a 'Developer ID …' identity (not ad-hoc/self-signed)." >&2
     exit 1
