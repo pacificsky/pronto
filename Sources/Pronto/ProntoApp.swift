@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // bootstrap is still caught. No-op when reporting is off or no DSN is baked
         // into the build.
         CrashReporting.startIfEnabled()
+        #if DEBUG
+        CrashReporting.fireSelfTestIfRequested()
+        #endif
         // Bring the cloud connection (and live websocket) up at launch and keep it
         // for the app's lifetime — not gated on the popover appearing.
         MainActor.assumeIsolated { MachineController.shared.bootstrap() }
