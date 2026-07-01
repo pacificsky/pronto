@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         CrashReporting.fireSelfTestIfRequested()
         #endif
+        // Release-safe: only crashes when launched with `-SentryCrashTest YES` and
+        // crash reporting is active — used to validate symbolication on a shipped
+        // build. No-op for normal launches.
+        CrashReporting.fireCrashTestIfRequested()
         // Bring the cloud connection (and live websocket) up at launch and keep it
         // for the app's lifetime — not gated on the popover appearing.
         MainActor.assumeIsolated { MachineController.shared.bootstrap() }

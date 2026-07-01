@@ -86,6 +86,32 @@ enum CrashReporting {
         }
     }
 
+    private static let log = Logger(subsystem: "blog.pacificsky.pronto", category: "crash-reporting")
+
+    /// Release-safe crash trigger, for validating end-to-end symbolication against
+    /// the uploaded dSYM on the *shipped* build (a thing a DEBUG build can't prove —
+    /// its binary has a different UUID). Deliberately crashes the app; the report is
+    /// captured and sent on next launch.
+    ///
+    /// Safe to ship: it fires only when launched with an explicit hidden argument
+    /// AND crash reporting is actually active (opted-in + a DSN baked in), so it can
+    /// never trigger for a normal user. Verify a release build with:
+    ///
+    ///   defaults write blog.pacificsky.pronto crashReportingEnabled -bool true
+    ///   open /Applications/Pronto.app --args -SentryCrashTest YES   # crashes on purpose
+    ///   open /Applications/Pronto.app                               # relaunch → report uploads
+    static func fireCrashTestIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "SentryCrashTest") else { return }
+        // Only crash if the SDK is live (same gate as start()), else the crash would
+        // go uncaptured and we'd just be killing the app for nothing.
+        guard Persistence.crashReportingEnabled, dsn != nil else {
+            log.error("SentryCrashTest requested but crash reporting is inactive — ignoring")
+            return
+        }
+        log.notice("SentryCrashTest: triggering a deliberate crash to validate symbolication")
+        SentrySDK.crash()
+    }
+
     // MARK: - Local test harness (DEBUG only, compiled out of release)
     //
     // Verify the live SDK → scrub → send pipeline without a GitHub secret (a dummy
