@@ -53,7 +53,8 @@ jobs:
       # nothing sensitive leaks).
       - name: Upload debug symbols to Sentry
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
-        run: "$RUNNER_TEMP/sentry-cli" debug-files upload --include-sources dist/Pronto.dSYM
+        run: |
+          "$RUNNER_TEMP/sentry-cli" debug-files upload --include-sources dist/Pronto.dSYM
 
       # Create + finalize the Sentry release for this version and associate the
       # commits since the last release, so events (tagged with the same version by
