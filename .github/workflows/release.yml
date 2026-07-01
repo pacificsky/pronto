@@ -89,20 +89,50 @@ jobs:
         # the hardened runtime + timestamp because the identity starts "Developer ID".
         run: APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
 
-      # Notarize the signed bundle and staple the ticket into it, so Gatekeeper
+      # Notarize the signed bundle, then staple the ticket into it so Gatekeeper
       # approves it offline (no first-launch warning). notarytool authenticates with
-      # the App Store Connect API key. --wait blocks until Apple returns a verdict;
-      # on rejection we dump the log and fail. Stapling happens BEFORE the zip step
-      # below, so the released asset carries the ticket.
+      # the App Store Connect API key.
+      #
+      # We deliberately do NOT use `notarytool submit --wait`: its long-poll aborts
+      # the whole job on a single transient network error (we hit NSURLErrorDomain
+      # -1009 mid-poll once, after Apple sat "In Progress" for 40+ min). Instead we
+      # submit, then poll `notarytool info` in a loop that TOLERATES transient errors
+      # (retries instead of failing) and caps total wait, and dump the notary log on
+      # any non-Accepted verdict. Stapling runs BEFORE the zip step below, so the
+      # released asset carries the ticket.
       - name: Notarize and staple
         run: |
           printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/notary.p8"
+          AUTH=(--key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_API_KEY_ID" --issuer "$NOTARY_API_ISSUER_ID")
           ditto -c -k --keepParent dist/Pronto.app "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --key "$RUNNER_TEMP/notary.p8" \
-            --key-id "$NOTARY_API_KEY_ID" \
-            --issuer "$NOTARY_API_ISSUER_ID" \
-            --wait
+
+          ID=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" "${AUTH[@]}" --output-format json | jq -r '.id')
+          if [ -z "$ID" ] || [ "$ID" = "null" ]; then
+            echo "::error::notarytool submit did not return a submission id"; exit 1
+          fi
+          echo "Submission ID: $ID"
+
+          # Poll until Apple reaches a terminal status. Apple's notary service can be
+          # badly backlogged (30+ min); a transient `info` error is retried, not fatal.
+          deadline=$(( $(date +%s) + 3600 ))   # give Apple up to 60 min total
+          status="In Progress"
+          while [ "$status" = "In Progress" ]; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Notarization still In Progress after 60 min — Apple's notary service is likely degraded; re-run this job later."
+              exit 1
+            fi
+            sleep 30
+            info=$(xcrun notarytool info "$ID" "${AUTH[@]}" --output-format json 2>/dev/null) || { echo "  (transient info error — retrying)"; continue; }
+            status=$(echo "$info" | jq -r '.status // "In Progress"' 2>/dev/null || echo "In Progress")
+            echo "  status: $status"
+          done
+
+          if [ "$status" != "Accepted" ]; then
+            echo "::error::Notarization $status — notary log follows"
+            xcrun notarytool log "$ID" "${AUTH[@]}" || true
+            exit 1
+          fi
+
           xcrun stapler staple dist/Pronto.app
           xcrun stapler validate dist/Pronto.app
 
