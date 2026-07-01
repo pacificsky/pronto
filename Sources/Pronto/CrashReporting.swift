@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Sentry
 
 /// Opt-in crash reporting via Sentry, configured so **no user-private data ever
@@ -44,6 +45,9 @@ enum CrashReporting {
         let scrubber = SensitiveDataScrubber.shared
         SentrySDK.start { o in
             o.dsn = dsn
+            #if DEBUG
+            o.debug = true  // local testing: Sentry prints its own lifecycle to the log
+            #endif
 
             // — Privacy: never attach personal data —
             o.sendDefaultPii = false        // no IP / user identifiers
@@ -64,7 +68,57 @@ enum CrashReporting {
 
             // — Privacy: scrub anything that still makes it into an event —
             o.beforeBreadcrumb = { crumb in scrubber.scrub(crumb) }
-            o.beforeSend = { event in scrubber.scrub(event) }
+            o.beforeSend = { event in
+                let scrubbed = scrubber.scrub(event)
+                #if DEBUG
+                debugPersist(scrubbed) // full, untruncated payload → /tmp for local leak-checking
+                #endif
+                return scrubbed
+            }
         }
     }
+
+    // MARK: - Local test harness (DEBUG only, compiled out of release)
+    //
+    // Verify the live SDK → scrub → send pipeline without a GitHub secret (a dummy
+    // DSN is enough to scrub-check; a real one also confirms delivery):
+    //
+    //   SENTRY_DSN="https://examplePublicKey@o0.ingest.sentry.io/0" ./make-app.sh debug
+    //   defaults write blog.pacificsky.pronto crashReportingEnabled -bool true
+    //   open dist/Pronto.app --args -SentrySelfTest YES
+    //   grep -c 'selftest.user@example.com\|LM555000' /tmp/pronto-sentry-events.txt  # → 0
+    //
+    // The offline `swift test` proves the scrubber on every event field; this proves
+    // it end-to-end through the real SentrySDK.
+    #if DEBUG
+    private static let debugLog = Logger(subsystem: "blog.pacificsky.pronto", category: "sentry-selftest")
+
+    /// Append the complete serialized (post-scrub) event to a file, so local leak
+    /// checks see the *whole* payload — `os_log` truncates at ~1 KB. Overwritten
+    /// fresh each launch. DEBUG-only.
+    static let debugDumpPath = "/tmp/pronto-sentry-events.txt"
+    private static func debugPersist(_ event: Event) {
+        let text = String(describing: event.serialize()) + "\n\n===EVENT-BOUNDARY===\n\n"
+        if let handle = FileHandle(forWritingAtPath: debugDumpPath) {
+            handle.seekToEndOfFile(); handle.write(Data(text.utf8)); try? handle.close()
+        } else {
+            try? text.write(toFile: debugDumpPath, atomically: true, encoding: .utf8)
+        }
+        debugLog.notice("wrote scrubbed event to \(debugDumpPath, privacy: .public)")
+    }
+
+    /// Local-only: fire a deliberately PII-laden non-fatal event to exercise the
+    /// live SDK → scrub → send pipeline. Triggered by launching with the
+    /// `-SentrySelfTest YES` argument (via `open --args`), or the
+    /// `PRONTO_SENTRY_SELFTEST=1` env var. The email/serial below are fake but
+    /// shaped like the real thing; if any reach Sentry the scrubber has a hole.
+    static func fireSelfTestIfRequested() {
+        let byArg = UserDefaults.standard.bool(forKey: "SentrySelfTest")
+        let byEnv = ProcessInfo.processInfo.environment["PRONTO_SENTRY_SELFTEST"] == "1"
+        guard byArg || byEnv else { return }
+        SensitiveDataScrubber.shared.register(["selftest.user@example.com", "LM555000"])
+        SentrySDK.capture(message: "SELFTEST leak-check: selftest.user@example.com serial LM555000 — none of this should appear in Sentry")
+        debugLog.notice("fired Sentry self-test event")
+    }
+    #endif
 }
