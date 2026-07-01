@@ -64,7 +64,8 @@ The workflow also creates + finalizes a **Sentry release** named after the versi
 so events group by version with suspect-commit detection. This only works because the
 app tags events with the *same* name — `CrashReporting` sets `options.releaseName` to
 `CFBundleShortVersionString` — so keep those two in sync. Commit association uses
-`--local` (needs the workflow's `fetch-depth: 0` checkout) and is best-effort: a
+`set-commits --auto` (Sentry's GitHub integration must have the repo added; the
+workflow's `fetch-depth: 0` checkout supplies the current SHA) and is best-effort: a
 failure there warns but doesn't fail the publish.
 
 ## Architecture

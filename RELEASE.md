@@ -22,7 +22,7 @@ Watch progress under the repo's **Actions** tab.
 
 ### What the workflow does
 
-1. Checks out the tagged commit on a `macos-14` runner.
+1. Checks out the tagged commit on a `macos-15` runner.
 2. Builds the app bundle with `SIGN_IDENTITY=- APP_VERSION="<tag without v>" ./make-app.sh release`
    (ad-hoc signed; the version from the tag is written into the bundle).
 3. If Sentry is configured (see below): uploads the `dist/Pronto.dSYM` debug symbols
