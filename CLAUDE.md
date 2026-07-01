@@ -59,6 +59,14 @@ DSN, by contrast, is public) with `SENTRY_ORG`/`SENTRY_PROJECT` repo *variables*
 the token is unset the upload is skipped and the release still publishes. The dSYM
 lives beside the bundle, not inside it, so it's never in the user zip.
 
+The workflow also creates + finalizes a **Sentry release** named after the version
+(the tag) and associates commits (`sentry-cli releases new/set-commits/finalize`),
+so events group by version with suspect-commit detection. This only works because the
+app tags events with the *same* name — `CrashReporting` sets `options.releaseName` to
+`CFBundleShortVersionString` — so keep those two in sync. Commit association uses
+`--local` (needs the workflow's `fetch-depth: 0` checkout) and is best-effort: a
+failure there warns but doesn't fail the publish.
+
 ## Architecture
 
 Single executable target, `Sources/Pronto`, `@main` is `ProntoApp`. UI is driven
