@@ -68,18 +68,22 @@ data when the user opts in *and* a DSN is baked in; see the crash-reporting note
 
 ## What people download
 
-The released `.zip` is **ad-hoc signed, not notarized by Apple**. On first launch
-of a downloaded copy, macOS Gatekeeper requires the user to **right-click → Open**
-once (the release notes tell them this). Because each ad-hoc build has a different
-code identity, users also get a one-time Keychain prompt for their saved
-credentials after updating to a new version (they click "Always Allow").
+The released `.zip` is **ad-hoc signed, not notarized by Apple**. On first launch of
+a downloaded copy, macOS Gatekeeper blocks it with *"Apple could not verify… is free
+of malware."* The user opens it once via **System Settings → Privacy & Security →
+Open Anyway** (or `xattr -dr com.apple.quarantine /Applications/Pronto.app`); the
+release notes spell this out. **Note:** the old **right-click → Open** bypass was
+removed in macOS 15 (Sequoia) and does nothing on 15+/Tahoe — *Open Anyway* is the
+current path. Because each ad-hoc build has a different code identity, users also get
+a one-time Keychain prompt for their saved credentials after updating (they click
+"Always Allow").
 
 To remove this friction in the future:
 
 - Stable identity across releases (kills the post-update Keychain prompt) —
   [issue #1](https://github.com/pacificsky/pronto/issues/1).
-- Developer ID signing + notarization (kills the Gatekeeper right-click entirely) —
-  [issue #2](https://github.com/pacificsky/pronto/issues/2).
+- Developer ID signing + notarization (kills the Gatekeeper block entirely — the
+  only real fix) — [issue #2](https://github.com/pacificsky/pronto/issues/2).
 
 ## Tips
 

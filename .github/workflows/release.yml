@@ -86,9 +86,15 @@ jobs:
 
           1. Download `Pronto-<version>.zip` below and unzip it.
           2. Move **Pronto.app** to your `/Applications` folder.
-          3. **First launch only:** right-click **Pronto.app** → **Open** → **Open**.
-             (Needed once because the app isn't notarized by Apple. After that it
-             opens normally.)
+          3. **First launch only** — because the app isn't notarized by Apple,
+             macOS blocks it with *"Apple could not verify… is free of malware."*
+             To open it once:
+             - Double-click **Pronto**, then click **Done** on the warning.
+             - Open **System Settings → Privacy & Security**, scroll to
+               **Security**, and click **Open Anyway** next to Pronto; confirm.
+             After that it opens normally. (On macOS 15+ the old "right-click →
+             Open" trick no longer works — use *Open Anyway* above.)
+             *Terminal alternative:* `xattr -dr com.apple.quarantine /Applications/Pronto.app`
           4. Click the cup icon in the menu bar → **Settings…** and sign in with
              your La Marzocco account.
 
