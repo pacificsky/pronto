@@ -35,9 +35,14 @@ The signing identity controls whether stored credentials survive rebuilds:
   Prefer this when iterating. First build prompts twice: a macOS trust-password
   dialog, then a codesign keychain-access prompt — click **"Always Allow"** on the
   latter or it re-prompts every build (it seeds the key's partition list).
-- **CI / release:** `SIGN_IDENTITY=- ./make-app.sh release` → ad-hoc signature
-  (no prompts, but identity changes every build → users re-confirm Keychain once
-  after each update).
+- **CI / release:** the release workflow imports an **Apple Developer ID Application**
+  cert and builds with `SIGN_IDENTITY="Developer ID Application: …"`, which makes
+  `make-app.sh` add `--options runtime --timestamp` (hardened runtime + secure
+  timestamp — both required to notarize). The bundle is then notarized (`notarytool
+  submit --wait`, App Store Connect API key) and the ticket **stapled** in. Result:
+  no Gatekeeper warning and a *stable* identity across releases (no post-update
+  Keychain re-prompt). Only a `Developer ID …` identity triggers those extra codesign
+  options; ad-hoc (`-`) and the local self-signed cert don't (they stay offline).
 
 `ensure_identity()` in `make-app.sh` imports the key + cert as **separate PEM
 items**, NOT a PKCS#12 bundle — macOS's `security import` rejects OpenSSL 3's
@@ -46,9 +51,12 @@ the private key and leaves an orphan cert. Don't switch it back to PKCS#12.
 
 ## Releases
 
-Push a `vMAJOR.MINOR.PATCH` tag; `.github/workflows/release.yml` builds, zips, and
-publishes a GitHub Release. The version comes from the tag via
-`APP_VERSION="<tag without v>"`. See RELEASE.md.
+Push a `vMAJOR.MINOR.PATCH` tag; `.github/workflows/release.yml` builds, signs with
+Developer ID, notarizes + staples, zips, and publishes a GitHub Release. The version
+comes from the tag via `APP_VERSION="<tag without v>"`. Signing/notarization is gated
+on repo secrets (`DEVELOPER_ID_CERT_P12_BASE64` + password, `NOTARY_API_KEY_P8_BASE64`
++ `NOTARY_API_KEY_ID`/`NOTARY_API_ISSUER_ID`); if the cert secret is unset the release
+**fails** (a release must be signed). See RELEASE.md.
 
 `make-app.sh` also emits `dist/Pronto.dSYM` (via `dsymutil` — the plain
 `swift build -c release` already carries a debug map, no `-g` needed) keyed by the

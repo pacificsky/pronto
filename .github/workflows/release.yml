@@ -20,6 +20,16 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      # Developer ID signing + notarization. The cert (.p12) and its export password
+      # sign the app with a stable, Apple-trusted identity; the App Store Connect API
+      # key (.p8 + its Key/Issuer IDs) authenticates the notarytool submission. All
+      # base64 where binary. If DEVELOPER_ID_CERT_P12_BASE64 is unset the build fails
+      # loudly (a release must be signed) — see the import step's guard.
+      DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
+      DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+      NOTARY_API_KEY_P8_BASE64: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
+      NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+      NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -34,12 +44,67 @@ jobs:
           swiftc --version
           xcrun --sdk macosx --show-sdk-version
 
-      - name: Build app bundle (ad-hoc signed)
+      # Import the Developer ID Application cert into a throwaway keychain so codesign
+      # can use it. The keychain password is generated inline (never leaves the run),
+      # so it isn't a stored secret. The exported identity name is passed to the build
+      # step via $GITHUB_ENV. NOTE: unlike make-app.sh's self-signed path, this p12 is
+      # exported by Keychain Access / Xcode in Apple's own format, which `security
+      # import` handles fine — the OpenSSL-3 p12 caveat there does not apply here.
+      - name: Import Developer ID certificate
+        run: |
+          if [ -z "$DEVELOPER_ID_CERT_P12_BASE64" ]; then
+            echo "::error::DEVELOPER_ID_CERT_P12_BASE64 is not set — cannot sign a release. See RELEASE.md." >&2
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"   # no auto-lock mid-build
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$DEVELOPER_ID_CERT_P12_BASE64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign
+          # Let codesign use the private key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Make the keychain visible to codesign's identity search.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found in the imported cert." >&2
+            exit 1
+          fi
+          echo "Signing identity: $IDENTITY"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build app bundle (Developer ID signed)
         env:
           # Baked into the bundle for opt-in crash reporting. Empty if the secret
           # isn't set, in which case crash reporting stays disabled in the build.
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: SIGN_IDENTITY=- APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
+        # SIGN_IDENTITY comes from the import step (via $GITHUB_ENV); make-app.sh adds
+        # the hardened runtime + timestamp because the identity starts "Developer ID".
+        run: APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
+
+      # Notarize the signed bundle and staple the ticket into it, so Gatekeeper
+      # approves it offline (no first-launch warning). notarytool authenticates with
+      # the App Store Connect API key. --wait blocks until Apple returns a verdict;
+      # on rejection we dump the log and fail. Stapling happens BEFORE the zip step
+      # below, so the released asset carries the ticket.
+      - name: Notarize and staple
+        run: |
+          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --keepParent dist/Pronto.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_API_KEY_ID" \
+            --issuer "$NOTARY_API_ISSUER_ID" \
+            --wait
+          xcrun stapler staple dist/Pronto.app
+          xcrun stapler validate dist/Pronto.app
 
       # All Sentry steps below are skipped when SENTRY_AUTH_TOKEN isn't configured,
       # so the release still publishes. sentry-cli reads org/project/token from the
@@ -86,15 +151,9 @@ jobs:
 
           1. Download `Pronto-<version>.zip` below and unzip it.
           2. Move **Pronto.app** to your `/Applications` folder.
-          3. **First launch only** — because the app isn't notarized by Apple,
-             macOS blocks it with *"Apple could not verify… is free of malware."*
-             To open it once:
-             - Double-click **Pronto**, then click **Done** on the warning.
-             - Open **System Settings → Privacy & Security**, scroll to
-               **Security**, and click **Open Anyway** next to Pronto; confirm.
-             After that it opens normally. (On macOS 15+ the old "right-click →
-             Open" trick no longer works — use *Open Anyway* above.)
-             *Terminal alternative:* `xattr -dr com.apple.quarantine /Applications/Pronto.app`
+          3. Double-click **Pronto** to launch it. (The app is signed with an Apple
+             Developer ID and notarized by Apple, so it opens with no security
+             warnings.)
           4. Click the cup icon in the menu bar → **Settings…** and sign in with
              your La Marzocco account.
 

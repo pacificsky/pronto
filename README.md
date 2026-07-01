@@ -20,9 +20,8 @@ Works with the **La Marzocco Linea Micra**, **Linea Mini**, and **GS3**.
    (grab the file ending in `.zip`).
 2. Open the downloaded file to unzip it, then drag **Pronto** into your
    **Applications** folder.
-3. The first time you open it, **right-click the Pronto app → Open → Open**.
-   (macOS shows a warning the first time for any app not from the App Store —
-   this is normal and only happens once.)
+3. Double-click **Pronto** to open it. (It's signed with an Apple Developer ID and
+   notarized by Apple, so it opens with no security warnings.)
 4. A coffee-cup icon appears in your menu bar. Click it → **Settings…** and sign
    in with the **same email and password you use in the official La Marzocco app**.
 

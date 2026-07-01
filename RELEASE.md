@@ -23,13 +23,19 @@ Watch progress under the repo's **Actions** tab.
 ### What the workflow does
 
 1. Checks out the tagged commit on a `macos-15` runner.
-2. Builds the app bundle with `SIGN_IDENTITY=- APP_VERSION="<tag without v>" ./make-app.sh release`
-   (ad-hoc signed; the version from the tag is written into the bundle).
-3. If Sentry is configured (see below): uploads the `dist/Pronto.dSYM` debug symbols
+2. Imports the **Developer ID Application** certificate into a throwaway keychain,
+   then builds with `APP_VERSION="<tag without v>" ./make-app.sh release`, signing with
+   that identity **plus the hardened runtime + a secure timestamp** (make-app.sh adds
+   those automatically for a `Developer ID …` identity — both are notarization
+   requirements).
+3. **Notarizes** the signed bundle with `xcrun notarytool submit … --wait` (App Store
+   Connect API key) and **staples** the ticket into the app, so Gatekeeper approves it
+   offline with no first-launch warning.
+4. If Sentry is configured (see below): uploads the `dist/Pronto.dSYM` debug symbols
    so crash reports symbolicate, and creates + finalizes a Sentry **release** for the
    version with its commits (so events group by version). Skipped otherwise.
-4. Zips the app with `ditto -c -k --keepParent`.
-5. Creates the GitHub Release with `gh release create` and an install-notes body.
+5. Zips the **stapled** app with `ditto -c -k --keepParent`.
+6. Creates the GitHub Release with `gh release create` and an install-notes body.
 
 ## One-time setup (already done)
 
@@ -41,6 +47,31 @@ These only matter if the repo is recreated or settings drift:
 - **Actions can write releases** — the workflow declares `permissions: contents: write`.
   If a run fails creating the release with a 403, check
   *Settings → Actions → General → Workflow permissions* is set to **Read and write**.
+
+## Code signing & notarization
+
+Releases are signed with an **Apple Developer ID Application** certificate and
+**notarized** by Apple, so downloaded copies open with no Gatekeeper warning and keep a
+*stable* code identity across updates (no post-update Keychain re-prompt). This is
+gated on repo **secrets** — if `DEVELOPER_ID_CERT_P12_BASE64` is missing the release
+**fails** (a release must be signed). Set them once:
+
+```sh
+# Developer ID Application cert exported from Keychain Access / Xcode as a .p12:
+base64 -i DeveloperID.p12 | gh secret set DEVELOPER_ID_CERT_P12_BASE64
+gh secret set DEVELOPER_ID_CERT_PASSWORD --body '<the .p12 export password>'
+
+# App Store Connect API key (Users and Access → Integrations → App Store Connect API,
+# Developer role). The .p8 is downloadable only once:
+base64 -i AuthKey_XXXXXXXXXX.p8 | gh secret set NOTARY_API_KEY_P8_BASE64
+gh secret set NOTARY_API_KEY_ID    --body '<Key ID>'
+gh secret set NOTARY_API_ISSUER_ID --body '<Issuer ID>'
+```
+
+The temp keychain's unlock password is generated inline in the workflow, so it is *not*
+a stored secret. `make-app.sh` still self-signs local dev builds (`Pronto Local
+Signing`) — only CI uses the Developer ID identity, and only a `Developer ID …`
+identity triggers the hardened-runtime + timestamp signing options.
 
 ## Sentry (crash reporting)
 
@@ -68,22 +99,24 @@ data when the user opts in *and* a DSN is baked in; see the crash-reporting note
 
 ## What people download
 
-The released `.zip` is **ad-hoc signed, not notarized by Apple**. On first launch of
-a downloaded copy, macOS Gatekeeper blocks it with *"Apple could not verify… is free
-of malware."* The user opens it once via **System Settings → Privacy & Security →
-Open Anyway** (or `xattr -dr com.apple.quarantine /Applications/Pronto.app`); the
-release notes spell this out. **Note:** the old **right-click → Open** bypass was
-removed in macOS 15 (Sequoia) and does nothing on 15+/Tahoe — *Open Anyway* is the
-current path. Because each ad-hoc build has a different code identity, users also get
-a one-time Keychain prompt for their saved credentials after updating (they click
-"Always Allow").
+The released `.zip` is **Developer ID signed and notarized by Apple**, with the
+notarization ticket **stapled** into the bundle. A downloaded copy opens on first
+launch with no Gatekeeper warning (even offline), and because the Developer ID identity
+is stable across releases, users get **no** Keychain re-prompt for their saved
+credentials after updating.
 
-To remove this friction in the future:
+To verify a build locally after downloading (or after
+`xattr -dr com.apple.quarantine /Applications/Pronto.app`):
 
-- Stable identity across releases (kills the post-update Keychain prompt) —
-  [issue #1](https://github.com/pacificsky/pronto/issues/1).
-- Developer ID signing + notarization (kills the Gatekeeper block entirely — the
-  only real fix) — [issue #2](https://github.com/pacificsky/pronto/issues/2).
+```sh
+spctl -a -vvv --type exec /Applications/Pronto.app   # accepted, source=Notarized Developer ID
+codesign -dv --verbose=4 /Applications/Pronto.app    # Authority: Developer ID Application; flags=runtime
+stapler validate /Applications/Pronto.app            # The validate action worked!
+```
+
+If notarization is **rejected** during a release, the workflow fails at the *Notarize
+and staple* step; run `xcrun notarytool log <submission-id> --key … --key-id … --issuer …`
+to see why.
 
 ## Tips
 

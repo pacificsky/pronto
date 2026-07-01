@@ -147,12 +147,30 @@ if [ "$SIGN_IDENTITY" = "-" ]; then
 else
     IDENTITY="$(ensure_identity)"
 fi
-if [ "$IDENTITY" = "-" ]; then
-    echo "▸ Code-signing (ad-hoc)…"
-else
-    echo "▸ Code-signing with '$IDENTITY'…"
-fi
-codesign --force --deep --sign "$IDENTITY" "$APP" >/dev/null 2>&1 || echo "  (codesign skipped)"
+# The app is a single self-contained binary (Sentry/Angstrom are statically linked;
+# it links only system frameworks + OS Swift dylibs), so there's no nested code to
+# sign — hence no `--deep`, which is deprecated for distribution anyway.
+SIGN_ARGS=(--force --sign "$IDENTITY")
+case "$IDENTITY" in
+    "Developer ID"*)
+        # Distribution build. Notarization REQUIRES the hardened runtime
+        # (--options runtime) and a secure timestamp (--timestamp, contacts Apple's
+        # TSA over the network). A broken Developer ID signature must never ship, so
+        # let set -e abort the build if codesign fails — don't swallow the error.
+        echo "▸ Code-signing with '$IDENTITY' (hardened runtime + timestamp)…"
+        codesign "${SIGN_ARGS[@]}" --options runtime --timestamp "$APP"
+        ;;
+    -)
+        echo "▸ Code-signing (ad-hoc)…"
+        codesign "${SIGN_ARGS[@]}" "$APP" >/dev/null 2>&1 || echo "  (codesign skipped)"
+        ;;
+    *)
+        # Local self-signed identity: no timestamp/hardened runtime so iteration
+        # stays offline and fast. Best-effort (don't block a dev build on signing).
+        echo "▸ Code-signing with '$IDENTITY'…"
+        codesign "${SIGN_ARGS[@]}" "$APP" >/dev/null 2>&1 || echo "  (codesign skipped)"
+        ;;
+esac
 
 # Debug symbols for Sentry symbolication. dsymutil gathers DWARF from the build's
 # .o files (via the binary's debug map) into a .dSYM keyed by the binary's LC_UUID
