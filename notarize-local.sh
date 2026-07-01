@@ -13,6 +13,11 @@
 #   APP_VERSION=0.5.4 ./notarize-local.sh
 #   SKIP_BUILD=1 ./notarize-local.sh    # notarize the existing dist/Pronto.app as-is
 #
+# NOTE: unlike the release workflow, this does NOT bake in a Sentry DSN by default, so
+# a build from here ships with crash reporting disabled. That's fine for a first-time
+# notarization warmup. If you're hand-cutting a *shipping* release, export the DSN first
+# so it matches CI:  SENTRY_DSN='https://…@…ingest.sentry.io/…' ./notarize-local.sh
+#
 # One-time credential setup (recommended) — store the App Store Connect API key in
 # your keychain so you don't pass it every run:
 #   xcrun notarytool store-credentials pronto-notary \
