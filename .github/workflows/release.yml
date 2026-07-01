@@ -58,17 +58,18 @@ jobs:
       # Create + finalize the Sentry release for this version and associate the
       # commits since the last release, so events (tagged with the same version by
       # the app — see CrashReporting.releaseName) group by version and Sentry can
-      # surface suspect commits / regressions. Commit association is best-effort:
-      # --local reads the checked-out git history (needs fetch-depth: 0) and
-      # --ignore-missing tolerates a first release with no prior ref; a hiccup there
-      # must not fail the publish.
+      # surface suspect commits / regressions. --auto uses Sentry's GitHub
+      # integration to resolve the commit range and link commits back to GitHub
+      # (needs the repo added under Sentry → Integrations → GitHub, and the
+      # fetch-depth: 0 checkout for the current SHA). Commit association is
+      # best-effort: a hiccup there warns but must not fail the publish.
       - name: Create Sentry release
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           SC="$RUNNER_TEMP/sentry-cli"
           "$SC" releases new "$VERSION"
-          "$SC" releases set-commits "$VERSION" --local --ignore-missing || echo "::warning::commit association skipped"
+          "$SC" releases set-commits "$VERSION" --auto || echo "::warning::commit association skipped"
           "$SC" releases finalize "$VERSION"
           "$SC" releases deploys "$VERSION" new -e production
 
