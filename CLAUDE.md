@@ -56,7 +56,10 @@ Developer ID, notarizes + staples, zips, and publishes a GitHub Release. The ver
 comes from the tag via `APP_VERSION="<tag without v>"`. Signing/notarization is gated
 on repo secrets (`DEVELOPER_ID_CERT_P12_BASE64` + password, `NOTARY_API_KEY_P8_BASE64`
 + `NOTARY_API_KEY_ID`/`NOTARY_API_ISSUER_ID`); if the cert secret is unset the release
-**fails** (a release must be signed). See RELEASE.md.
+**fails** (a release must be signed). See RELEASE.md. Apple's notary can occasionally
+backlog for 40–60+ min (the CI step retries transient errors but caps at 60 min); when
+it won't clear in time, notarize by hand with `notarize-local.sh` (same signing path via
+`make-app.sh`, uncapped poll). See RELEASE.md.
 
 `make-app.sh` also emits `dist/Pronto.dSYM` (via `dsymutil` — the plain
 `swift build -c release` already carries a debug map, no `-g` needed) keyed by the

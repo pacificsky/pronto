@@ -73,11 +73,13 @@ a stored secret. `make-app.sh` still self-signs local dev builds (`Pronto Local
 Signing`) — only CI uses the Developer ID identity, and only a `Developer ID …`
 identity triggers the hardened-runtime + timestamp signing options.
 
-### First notarization / notarizing by hand (`notarize-local.sh`)
+### Notarizing by hand (`notarize-local.sh`)
 
-Apple's notary service can take a **very** long time on the *first* submission for a new
-app/team — long enough to blow past the CI job's cap. Do that first notarization from
-your own machine instead, where it can run as long as it needs:
+Apple's notary service is usually quick (~30s), but it can fall into a **backlog** and
+sit "In Progress" for 40–60+ minutes — sometimes even while the [status page](https://developer.apple.com/system-status/)
+shows green — which can blow past the CI job's notarization cap. When that happens (or
+whenever you want to hand-cut a release), notarize from your own machine instead, where
+the wait has no time limit:
 
 ```sh
 # One-time: store the App Store Connect API key in your keychain.
@@ -92,7 +94,10 @@ It auto-detects your `Developer ID Application` identity, builds via `make-app.s
 (hardened runtime + timestamp), submits, polls resiliently (retries transient network
 errors, no hard cap — Ctrl-C anytime), staples, and writes `dist/Pronto.zip`. Use
 `SKIP_BUILD=1` to notarize an already-built `dist/Pronto.app`, or `APP_VERSION=…` to
-stamp a version. Once that first submission clears, the CI path notarizes quickly.
+stamp a version. Export `SENTRY_DSN` too if you're hand-cutting a shipping build (CI
+bakes it in; this script doesn't by default). If a CI release fails at the notarize
+step because Apple was slow, re-running the job once the backlog clears is usually
+enough — this script is the fallback for when it won't clear in time.
 
 ## Sentry (crash reporting)
 
