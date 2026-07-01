@@ -22,6 +22,8 @@ jobs:
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # full history so Sentry release commit association works
 
       # The default toolchain can ship an SDK older than our macOS 14 deployment
       # target (which broke the build on `openSettings`, a macOS 14.0 API).
@@ -39,15 +41,36 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: SIGN_IDENTITY=- APP_VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh release
 
-      # Upload debug symbols so Sentry can symbolicate crash reports. Skipped when
-      # SENTRY_AUTH_TOKEN isn't configured, so the release still publishes. sentry-cli
-      # reads org/project/token from the job env. --include-sources embeds our source
-      # for in-Sentry code context (the repo is public, so nothing sensitive leaks).
+      # All Sentry steps below are skipped when SENTRY_AUTH_TOKEN isn't configured,
+      # so the release still publishes. sentry-cli reads org/project/token from the
+      # job env.
+      - name: Install sentry-cli
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        run: curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP" bash
+
+      # Debug symbols so Sentry can symbolicate crash reports. --include-sources
+      # embeds our source for in-Sentry code context (the repo is public, so
+      # nothing sensitive leaks).
       - name: Upload debug symbols to Sentry
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        run: "$RUNNER_TEMP/sentry-cli" debug-files upload --include-sources dist/Pronto.dSYM
+
+      # Create + finalize the Sentry release for this version and associate the
+      # commits since the last release, so events (tagged with the same version by
+      # the app — see CrashReporting.releaseName) group by version and Sentry can
+      # surface suspect commits / regressions. Commit association is best-effort:
+      # --local reads the checked-out git history (needs fetch-depth: 0) and
+      # --ignore-missing tolerates a first release with no prior ref; a hiccup there
+      # must not fail the publish.
+      - name: Create Sentry release
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         run: |
-          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP" bash
-          "$RUNNER_TEMP/sentry-cli" debug-files upload --include-sources dist/Pronto.dSYM
+          VERSION="${GITHUB_REF_NAME#v}"
+          SC="$RUNNER_TEMP/sentry-cli"
+          "$SC" releases new "$VERSION"
+          "$SC" releases set-commits "$VERSION" --local --ignore-missing || echo "::warning::commit association skipped"
+          "$SC" releases finalize "$VERSION"
+          "$SC" releases deploys "$VERSION" new -e production
 
       - name: Zip the .app
         run: ditto -c -k --keepParent dist/Pronto.app "Pronto-${GITHUB_REF_NAME}.zip"

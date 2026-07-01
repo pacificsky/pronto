@@ -45,6 +45,14 @@ enum CrashReporting {
         let scrubber = SensitiveDataScrubber.shared
         SentrySDK.start { o in
             o.dsn = dsn
+            // Tag events with the bundle version so they associate with the Sentry
+            // release the release workflow creates under the same name (the tag,
+            // e.g. "0.5.0"). Must stay in sync with `sentry-cli releases new` in
+            // release.yml. Omit (SDK default) if the version is unreadable.
+            if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+               !version.isEmpty {
+                o.releaseName = version
+            }
             #if DEBUG
             o.debug = true  // local testing: Sentry prints its own lifecycle to the log
             #endif
