@@ -25,8 +25,11 @@ Watch progress under the repo's **Actions** tab.
 1. Checks out the tagged commit on a `macos-14` runner.
 2. Builds the app bundle with `SIGN_IDENTITY=- APP_VERSION="<tag without v>" ./make-app.sh release`
    (ad-hoc signed; the version from the tag is written into the bundle).
-3. Zips it with `ditto -c -k --keepParent`.
-4. Creates the GitHub Release with `gh release create` and an install-notes body.
+3. If Sentry is configured (see below): uploads the `dist/Pronto.dSYM` debug symbols
+   so crash reports symbolicate, and creates + finalizes a Sentry **release** for the
+   version with its commits (so events group by version). Skipped otherwise.
+4. Zips the app with `ditto -c -k --keepParent`.
+5. Creates the GitHub Release with `gh release create` and an install-notes body.
 
 ## One-time setup (already done)
 
@@ -38,6 +41,30 @@ These only matter if the repo is recreated or settings drift:
 - **Actions can write releases** — the workflow declares `permissions: contents: write`.
   If a run fails creating the release with a 403, check
   *Settings → Actions → General → Workflow permissions* is set to **Read and write**.
+
+## Sentry (crash reporting)
+
+Opt-in crash reporting is wired into the release pipeline but **gated on these repo
+secrets/variables** — if they're absent, the Sentry steps are skipped and the release
+still publishes normally. Set them once (values come from your Sentry project under
+*Settings → Client Keys (DSN)* and *Auth Tokens*):
+
+```sh
+gh secret set SENTRY_DSN --body "https://…@…ingest.sentry.io/…"   # public/embeddable
+gh secret set SENTRY_AUTH_TOKEN --body "sntrys_…"                 # write-scoped — real secret
+gh variable set SENTRY_ORG --body "your-org"                      # not sensitive
+gh variable set SENTRY_PROJECT --body "pronto"                    # not sensitive
+```
+
+Why the split: the **DSN** is baked into the shipped app (it's meant to be public), so
+it lives as a secret only to keep it out of the repo. The **auth token** can write to
+your Sentry project (uploads symbols, creates releases), so it's a genuine secret —
+prefer a scoped *organization* auth token. The **org/project slugs** aren't sensitive,
+so they're plain repo *variables* (`vars.*`, not `secrets.*`).
+
+Verify what's set with `gh secret list` and `gh variable list`. The app only sends
+data when the user opts in *and* a DSN is baked in; see the crash-reporting notes in
+`CLAUDE.md` for the privacy design.
 
 ## What people download
 
