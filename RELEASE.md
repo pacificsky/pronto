@@ -73,6 +73,27 @@ a stored secret. `make-app.sh` still self-signs local dev builds (`Pronto Local
 Signing`) — only CI uses the Developer ID identity, and only a `Developer ID …`
 identity triggers the hardened-runtime + timestamp signing options.
 
+### First notarization / notarizing by hand (`notarize-local.sh`)
+
+Apple's notary service can take a **very** long time on the *first* submission for a new
+app/team — long enough to blow past the CI job's cap. Do that first notarization from
+your own machine instead, where it can run as long as it needs:
+
+```sh
+# One-time: store the App Store Connect API key in your keychain.
+xcrun notarytool store-credentials pronto-notary \
+  --key /path/AuthKey_XXXXXXXXXX.p8 --key-id <KEY_ID> --issuer <ISSUER_ID>
+
+# Build + sign (Developer ID) + notarize + staple + zip. Leave it running.
+./notarize-local.sh
+```
+
+It auto-detects your `Developer ID Application` identity, builds via `make-app.sh`
+(hardened runtime + timestamp), submits, polls resiliently (retries transient network
+errors, no hard cap — Ctrl-C anytime), staples, and writes `dist/Pronto.zip`. Use
+`SKIP_BUILD=1` to notarize an already-built `dist/Pronto.app`, or `APP_VERSION=…` to
+stamp a version. Once that first submission clears, the CI path notarizes quickly.
+
 ## Sentry (crash reporting)
 
 Opt-in crash reporting is wired into the release pipeline but **gated on these repo
