@@ -50,6 +50,15 @@ Push a `vMAJOR.MINOR.PATCH` tag; `.github/workflows/release.yml` builds, zips, a
 publishes a GitHub Release. The version comes from the tag via
 `APP_VERSION="<tag without v>"`. See RELEASE.md.
 
+`make-app.sh` also emits `dist/Pronto.dSYM` (via `dsymutil` — the plain
+`swift build -c release` already carries a debug map, no `-g` needed) keyed by the
+binary's `LC_UUID`, which code-signing leaves unchanged. The release workflow uploads
+it to Sentry with `sentry-cli debug-files upload --include-sources` so crash reports
+symbolicate. That step is gated on a `SENTRY_AUTH_TOKEN` secret (write-scoped; the
+DSN, by contrast, is public) with `SENTRY_ORG`/`SENTRY_PROJECT` repo *variables* — if
+the token is unset the upload is skipped and the release still publishes. The dSYM
+lives beside the bundle, not inside it, so it's never in the user zip.
+
 ## Architecture
 
 Single executable target, `Sources/Pronto`, `@main` is `ProntoApp`. UI is driven

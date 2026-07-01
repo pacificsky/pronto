@@ -154,4 +154,11 @@ else
 fi
 codesign --force --deep --sign "$IDENTITY" "$APP" >/dev/null 2>&1 || echo "  (codesign skipped)"
 
+# Debug symbols for Sentry symbolication. dsymutil gathers DWARF from the build's
+# .o files (via the binary's debug map) into a .dSYM keyed by the binary's LC_UUID
+# — which code-signing doesn't change, so it matches the shipped binary. Kept
+# beside the bundle (not inside it); the release workflow uploads it to Sentry.
+echo "▸ Generating dSYM…"
+dsymutil "$BIN" -o "$DIST/$APP_NAME.dSYM"
+
 echo "✓ Built $APP"
