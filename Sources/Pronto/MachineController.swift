@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import OSLog
+import AppKit
+import Network
 import Angstrom
 import AngstromUI
 
@@ -70,6 +72,28 @@ final class MachineController {
     /// the popover's.
     static let shared = MachineController()
 
+    /// How often to reconcile the dashboard over REST while connected. Since
+    /// Angstrom 1.2.0 the library re-fetches the dashboard after every websocket
+    /// reconnect and recycles zombie sockets via enforced ping/pong, so this poll
+    /// is no longer the primary healer for missed pushes — just a belt-and-braces
+    /// sweep, hence hourly (negligible LM cloud load). The popover also refreshes
+    /// on open (``refreshNow()``), so what the user looks at is always current.
+    static let reconcileInterval: Duration = .seconds(60 * 60)
+
+    /// Grace period before a websocket gap is surfaced as "Stale". The badge is
+    /// keyed off Angstrom's truthful `isConnected`; without a grace, the routine
+    /// CloudFront flow recycle (~40 min cadence, reconnects in seconds) would
+    /// flash the stale state as noise. Disconnected with data older than this is
+    /// honestly stale.
+    static let staleGrace: TimeInterval = 2 * 60
+
+    /// Popover-open refreshes are skipped while the socket is connected and the
+    /// last update is younger than this. With a healthy socket the data is current
+    /// by construction (pushes + reconnect refresh), so most opens cost nothing;
+    /// past this age a refresh guards the one gap the socket can't see — a push
+    /// the cloud silently never sent.
+    static let viewRefreshAge: TimeInterval = 10 * 60
+
     private(set) var connection: ConnectionState = .notConfigured
     private(set) var machines: [Machine] = []
     private(set) var selectedSerial: String?
@@ -90,6 +114,13 @@ final class MachineController {
     @ObservationIgnored private var client: LaMarzoccoCloudClient?
     @ObservationIgnored private var commandTask: Task<Void, Never>?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var pathMonitor: NWPathMonitor?
+    @ObservationIgnored private var wakeObserver: (any NSObjectProtocol)?
+    /// Last-seen network reachability, so we only reconnect on a genuine
+    /// offline→online transition (not every path update). Starts `true` so the
+    /// launch-time connect isn't duplicated by an initial "satisfied" callback.
+    @ObservationIgnored private var pathSatisfied = true
     @ObservationIgnored private var booted = false
 
     /// Selected machine's power, derived from the live dashboard.
@@ -128,6 +159,14 @@ final class MachineController {
     /// transient socket drops (the client auto-reconnects underneath).
     var isLive: Bool { device?.isLive ?? false }
 
+    /// Truthful socket health (Angstrom 1.2.0+): unlike ``isLive``, flips `false`
+    /// during silent drops and zombie-socket gaps while auto-reconnect works.
+    var isSocketConnected: Bool { device?.isConnected ?? false }
+
+    /// When the dashboard last changed from the cloud — a REST refresh or an
+    /// applied websocket push. Stamped by Angstrom; `nil` until the first load.
+    var lastUpdateAt: Date? { device?.lastUpdateAt }
+
     var hasCredentials: Bool { config.isComplete }
     var username: String { config.username }
 
@@ -142,6 +181,12 @@ final class MachineController {
         booted = true
         selectedSerial = config.selectedSerial
         registerSensitiveDataForScrubbing()
+        // Resilience: keep last-known state fresh and recover the live connection
+        // across sleep/wake, network changes, and silently-dropped pushes. These
+        // run for the app's lifetime and no-op until a machine is connected.
+        startReconcileLoop()
+        installWakeObserver()
+        startPathMonitoring()
         if config.isComplete {
             Task { await connect() }
         } else {
@@ -313,6 +358,115 @@ final class MachineController {
             log.error("websocket start failed: \(error.localizedDescription, privacy: .public)")
             // Live updates are best-effort; we already have a one-shot dashboard
             // and the underlying socket self-heals on reconnect.
+        }
+    }
+
+    // MARK: - Resilience (reconcile poll, wake, reachability)
+
+    /// True when the data on screen can no longer be trusted as current: the
+    /// socket is actually down (Angstrom's truthful `isConnected`) and the last
+    /// cloud update is older than ``staleGrace``. While `isConnected` is true the
+    /// data *is* current — any change is pushed, and 1.2.0 re-fetches the
+    /// dashboard on every reconnect — so no time-based check is needed then.
+    var isDataStale: Bool {
+        guard connection == .connected, let device else { return false }
+        if device.isConnected { return false }
+        guard let last = device.lastUpdateAt else { return true }
+        return Date().timeIntervalSince(last) > Self.staleGrace
+    }
+
+    /// Periodic REST reconcile. Runs for the app's lifetime; no-ops unless a
+    /// machine is live and connected.
+    private func startReconcileLoop() {
+        pollTask?.cancel()
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.reconcileInterval)
+                if Task.isCancelled { return }
+                await self?.reconcile()
+            }
+        }
+    }
+
+    /// Conditional reconcile for when the user looks (popover open). No-op while
+    /// the socket is connected and the data is younger than ``viewRefreshAge`` —
+    /// in that state the dashboard is current by construction, and refreshing on
+    /// every open would be pointless API traffic. Fetches only when it could
+    /// plausibly matter: socket down, nothing loaded yet, or data old enough that
+    /// a silently-dropped push could be hiding behind a healthy-looking socket.
+    func refreshNow() {
+        guard let device, connection == .connected else { return }
+        if device.isConnected, let last = device.lastUpdateAt,
+           Date().timeIntervalSince(last) < Self.viewRefreshAge { return }
+        Task { await reconcile() }
+    }
+
+    private func reconcile() async {
+        guard let device, connection == .connected else { return }
+        do {
+            try await device.refreshDashboard()
+        } catch LaMarzoccoError.authenticationFailed {
+            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
+        } catch {
+            // Transient — keep last-known state. If the socket is also dead, the
+            // stale indicator trips and a wake/reachability event forces a cycle.
+            log.debug("reconcile refresh failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Bring the connection back to a *verified* state. Used on wake and when
+    /// network reachability returns: we don't trust the existing socket (it may be
+    /// a half-open zombie the client can't detect), so force a full cycle.
+    /// ``startLive()`` tears the old socket down, re-fetches the dashboard, and
+    /// opens a fresh subscription. If we never fully connected (client absent or
+    /// not `.connected`), do a full ``connect()`` instead so machines/selection are
+    /// re-established first.
+    private func ensureFreshConnection() {
+        guard config.isComplete else { return }
+        if client == nil || connection != .connected {
+            Task { await connect() }
+        } else {
+            startLive()
+        }
+    }
+
+    /// Reconnect on system wake. A socket that "survived" sleep is unreliable — the
+    /// peer may have dropped it while we were suspended, leaving a half-open
+    /// connection the client can't tell from a healthy one — so we cycle it. Only
+    /// full wakes post `didWakeNotification` (not the brief DarkWake maintenance
+    /// windows), so this doesn't churn overnight.
+    private func installWakeObserver() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                log.notice("system wake — forcing a fresh connection")
+                self.ensureFreshConnection()
+            }
+        }
+    }
+
+    /// Reconnect when connectivity is regained (e.g. Wi-Fi returns after being
+    /// offline), and avoid pointless reconnect churn while there's no network.
+    private func startPathMonitoring() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in self?.handlePathUpdate(satisfied: satisfied) }
+        }
+        monitor.start(queue: DispatchQueue(label: "blog.pacificsky.pronto.pathmonitor"))
+        pathMonitor = monitor
+    }
+
+    private func handlePathUpdate(satisfied: Bool) {
+        let regained = satisfied && !pathSatisfied
+        pathSatisfied = satisfied
+        if regained {
+            log.notice("network reachability regained — forcing a fresh connection")
+            ensureFreshConnection()
         }
     }
 }

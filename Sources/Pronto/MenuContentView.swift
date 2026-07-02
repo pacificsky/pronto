@@ -47,6 +47,9 @@ struct MenuContentView: View {
         }
         .padding(14)
         .frame(width: 280)
+        // Reconcile when the popover opens — but only if it could matter (socket
+        // down or data past its freshness window); healthy opens cost no traffic.
+        .onAppear { controller.refreshNow() }
     }
 
     // MARK: Sections
@@ -245,16 +248,37 @@ struct MenuContentView: View {
         }
     }
 
-    /// Small live-connection badge: filled bolt when the websocket subscription is
-    /// active, a dimmed slashed bolt while it's only REST (e.g. socket couldn't open).
-    private var liveIndicator: some View {
-        Label(controller.isLive ? "Live" : "Polling",
-              systemImage: controller.isLive ? "bolt.horizontal.fill" : "bolt.horizontal")
-            .font(.caption2)
-            .foregroundStyle(controller.isLive ? .green : .secondary)
-            .help(controller.isLive
-                  ? "Live updates over websocket are active."
-                  : "Not receiving live updates; showing last fetched status.")
+    /// Small connection badge. Green "Live" when the websocket is *actually*
+    /// connected (`isSocketConnected` — real socket health, not just the
+    /// subscription, which stays nominally active across silent drops); amber
+    /// "Stale" when the socket is down and the last-known data has outlived the
+    /// grace window; dimmed "Polling" otherwise (socket down/reconnecting, or
+    /// live updates never started, with data still recent).
+    @ViewBuilder private var liveIndicator: some View {
+        if controller.isDataStale {
+            Label("Stale", systemImage: "clock.badge.exclamationmark")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .help(staleHelp)
+        } else if controller.isSocketConnected {
+            Label("Live", systemImage: "bolt.horizontal.fill")
+                .font(.caption2)
+                .foregroundStyle(.green)
+                .help("Live updates over websocket are active.")
+        } else {
+            Label("Polling", systemImage: "bolt.horizontal")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .help("Not receiving live updates; showing last fetched status.")
+        }
+    }
+
+    private var staleHelp: String {
+        if let last = controller.lastUpdateAt {
+            let minutes = max(1, Int(Date().timeIntervalSince(last) / 60))
+            return "Connection lost — last update \(minutes)m ago. Reconnecting…"
+        }
+        return "Connection lost — reconnecting…"
     }
 
     // MARK: Helpers

@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pacificsky/angstrom.git",
       "state" : {
-        "revision" : "191be2003627f44fe5a770eeabb8a8b4138808d3",
-        "version" : "1.1.0"
+        "revision" : "81bc17553216435ad21dd4d4f2a07aa8d4668c50",
+        "version" : "1.2.0"
       }
     },
     {
