@@ -47,6 +47,9 @@ struct MenuContentView: View {
         }
         .padding(14)
         .frame(width: 280)
+        // Refresh the moment the popover opens, so the state you're looking at is
+        // current regardless of the background reconcile phase.
+        .onAppear { controller.refreshNow() }
     }
 
     // MARK: Sections
@@ -245,16 +248,28 @@ struct MenuContentView: View {
         }
     }
 
-    /// Small live-connection badge: filled bolt when the websocket subscription is
-    /// active, a dimmed slashed bolt while it's only REST (e.g. socket couldn't open).
-    private var liveIndicator: some View {
-        Label(controller.isLive ? "Live" : "Polling",
-              systemImage: controller.isLive ? "bolt.horizontal.fill" : "bolt.horizontal")
-            .font(.caption2)
-            .foregroundStyle(controller.isLive ? .green : .secondary)
-            .help(controller.isLive
-                  ? "Live updates over websocket are active."
-                  : "Not receiving live updates; showing last fetched status.")
+    /// Small connection badge. Green "Live" when the websocket subscription is up
+    /// and data is current; amber "Stale" when connected but no fresh update has
+    /// arrived within the staleness window (the honest signal — `isLive` alone can
+    /// stay `true` over a silently-dead socket); dimmed "Polling" when live updates
+    /// aren't active but recent data exists.
+    @ViewBuilder private var liveIndicator: some View {
+        if controller.isDataStale {
+            Label("Stale", systemImage: "clock.badge.exclamationmark")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .help("No fresh status recently — reconnecting. Showing last-known state.")
+        } else if controller.isLive {
+            Label("Live", systemImage: "bolt.horizontal.fill")
+                .font(.caption2)
+                .foregroundStyle(.green)
+                .help("Live updates over websocket are active.")
+        } else {
+            Label("Polling", systemImage: "bolt.horizontal")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .help("Not receiving live updates; showing last fetched status.")
+        }
     }
 
     // MARK: Helpers
