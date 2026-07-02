@@ -36,6 +36,15 @@ Watch progress under the repo's **Actions** tab.
    version with its commits (so events group by version). Skipped otherwise.
 5. Zips the **stapled** app with `ditto -c -k --keepParent`.
 6. Creates the GitHub Release with `gh release create` and an install-notes body.
+7. Updates the Homebrew tap: renders `packaging/pronto.rb.tmpl` with the new
+   version + zip sha256 and pushes `Casks/pronto.rb` to
+   [pacificsky/homebrew-tap](https://github.com/pacificsky/homebrew-tap).
+   Skipped (with a warning) if the `HOMEBREW_TAP_TOKEN` secret is unset; a
+   push failure fails the job. The GitHub Release is already published by
+   then; recover by hand — `./packaging/render-cask.sh <version> <sha256 of
+   the published zip>` and push the output to the tap as `Casks/pronto.rb`.
+   (Job re-runs can't reach this step: release creation fails on an existing
+   release, and a rebuilt zip's sha256 wouldn't match the published asset.)
 
 ## One-time setup (already done)
 
@@ -47,6 +56,11 @@ These only matter if the repo is recreated or settings drift:
 - **Actions can write releases** — the workflow declares `permissions: contents: write`.
   If a run fails creating the release with a 403, check
   *Settings → Actions → General → Workflow permissions* is set to **Read and write**.
+- `HOMEBREW_TAP_TOKEN` repo secret: fine-grained PAT scoped to
+  `pacificsky/homebrew-tap` only, permission **Contents: Read and write**.
+  Used by the "Update Homebrew cask" step. Fine-grained PATs expire (max 1
+  year; this one was created 2026-07-01) — rotate it before then, and a 401
+  from the "Update Homebrew cask" step means the token needs regenerating.
 
 ## Code signing & notarization
 
@@ -130,6 +144,10 @@ notarization ticket **stapled** into the bundle. A downloaded copy opens on firs
 launch with no Gatekeeper warning (even offline), and because the Developer ID identity
 is stable across releases, users get **no** Keychain re-prompt for their saved
 credentials after updating.
+
+Homebrew users get the exact same zip: the cask downloads the release asset
+from GitHub, so signature, notarization ticket, and Keychain identity are
+identical to a manual download.
 
 To verify a build locally after downloading (or after
 `xattr -dr com.apple.quarantine /Applications/Pronto.app`):
