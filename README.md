@@ -16,14 +16,23 @@ Works with the **La Marzocco Linea Micra**, **Linea Mini**, and **GS3**.
 
 ## Install
 
+**Homebrew** (recommended — updates via `brew upgrade`):
+
+```sh
+brew install --cask pacificsky/tap/pronto
+```
+
+**Or manually:**
+
 1. **[Download the latest version here](https://github.com/pacificsky/pronto/releases/latest)**
    (grab the file ending in `.zip`).
 2. Open the downloaded file to unzip it, then drag **Pronto** into your
    **Applications** folder.
 3. Double-click **Pronto** to open it. (It's signed with an Apple Developer ID and
    notarized by Apple, so it opens with no security warnings.)
-4. A coffee-cup icon appears in your menu bar. Click it → **Settings…** and sign
-   in with the **same email and password you use in the official La Marzocco app**.
+
+Then click the coffee-cup icon in your menu bar → **Settings…** and sign in with
+the **same email and password you use in the official La Marzocco app**.
 
 That's it! Pick your machine and you'll see **Turn On** / **Turn Off** buttons.
 
