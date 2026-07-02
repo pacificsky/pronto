@@ -72,22 +72,20 @@ final class MachineController {
     /// the popover's.
     static let shared = MachineController()
 
-    /// How often to reconcile the dashboard over REST while connected. The
-    /// websocket is the primary, low-latency path and the popover also refreshes on
-    /// open (see ``refreshNow()``), so this poll is only a slow background backstop
-    /// that heals state a missed/dropped push left stale (see the stale-status
-    /// incident: a boiler that finished heating while the Mac slept never received
-    /// its "ready" push). Deliberately infrequent to stay well under any LM cloud
-    /// rate limit.
-    static let reconcileInterval: Duration = .seconds(10 * 60)
+    /// How often to reconcile the dashboard over REST while connected. Since
+    /// Angstrom 1.2.0 the library re-fetches the dashboard after every websocket
+    /// reconnect and recycles zombie sockets via enforced ping/pong, so this poll
+    /// is no longer the primary healer for missed pushes — just a belt-and-braces
+    /// sweep, hence hourly (negligible LM cloud load). The popover also refreshes
+    /// on open (``refreshNow()``), so what the user looks at is always current.
+    static let reconcileInterval: Duration = .seconds(60 * 60)
 
-    /// Data older than this — connected, but with no update from any path — is
-    /// surfaced as stale in the UI. Must sit *above* ``reconcileInterval``: an idle
-    /// machine emits no websocket pushes, so on a healthy connection `lastUpdateAt`
-    /// only advances each poll; a threshold below the poll interval would false-trip
-    /// to "stale" during normal idle operation. Set to two poll cycles so one
-    /// missed/failed poll doesn't alarm.
-    static let staleThreshold: TimeInterval = 20 * 60
+    /// Grace period before a websocket gap is surfaced as "Stale". The badge is
+    /// keyed off Angstrom's truthful `isConnected`; without a grace, the routine
+    /// CloudFront flow recycle (~40 min cadence, reconnects in seconds) would
+    /// flash the stale state as noise. Disconnected with data older than this is
+    /// honestly stale.
+    static let staleGrace: TimeInterval = 2 * 60
 
     private(set) var connection: ConnectionState = .notConfigured
     private(set) var machines: [Machine] = []
@@ -104,11 +102,6 @@ final class MachineController {
     /// The live, observable view of the selected machine. Its `dashboard` is kept
     /// current by the websocket; `power` is derived from it.
     private(set) var device: LaMarzoccoMachine?
-
-    /// Timestamp of the most recent dashboard update — from a websocket push, a
-    /// reconcile poll, or an optimistic command update. Drives ``isDataStale``.
-    /// `nil` until the first dashboard loads.
-    private(set) var lastUpdateAt: Date?
 
     @ObservationIgnored private var config = Persistence.loadConfig()
     @ObservationIgnored private var client: LaMarzoccoCloudClient?
@@ -159,6 +152,14 @@ final class MachineController {
     /// transient socket drops (the client auto-reconnects underneath).
     var isLive: Bool { device?.isLive ?? false }
 
+    /// Truthful socket health (Angstrom 1.2.0+): unlike ``isLive``, flips `false`
+    /// during silent drops and zombie-socket gaps while auto-reconnect works.
+    var isSocketConnected: Bool { device?.isConnected ?? false }
+
+    /// When the dashboard last changed from the cloud — a REST refresh or an
+    /// applied websocket push. Stamped by Angstrom; `nil` until the first load.
+    var lastUpdateAt: Date? { device?.lastUpdateAt }
+
     var hasCredentials: Bool { config.isComplete }
     var username: String { config.username }
 
@@ -176,7 +177,6 @@ final class MachineController {
         // Resilience: keep last-known state fresh and recover the live connection
         // across sleep/wake, network changes, and silently-dropped pushes. These
         // run for the app's lifetime and no-op until a machine is connected.
-        trackDashboardFreshness()
         startReconcileLoop()
         installWakeObserver()
         startPathMonitoring()
@@ -262,7 +262,6 @@ final class MachineController {
         Task { await previous?.stop() }
         pendingTarget = nil
         actionError = nil
-        lastUpdateAt = nil
         Persistence.clearAll()
         config = Persistence.loadConfig()
         client = nil
@@ -335,7 +334,6 @@ final class MachineController {
         // carry no machine identity) are dropped — so load it once first.
         do {
             try await machine.refreshDashboard()
-            lastUpdateAt = Date()
         } catch LaMarzoccoError.authenticationFailed {
             connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
             return
@@ -358,13 +356,16 @@ final class MachineController {
 
     // MARK: - Resilience (reconcile poll, wake, reachability)
 
-    /// True when connected but no fresh dashboard has arrived within
-    /// ``staleThreshold``. This is the honest "are we actually current?" signal:
-    /// ``isLive`` only reflects the *subscription*, and can stay `true` over a
-    /// silently-dead socket. A `nil` baseline (no data yet) is not stale.
+    /// True when the data on screen can no longer be trusted as current: the
+    /// socket is actually down (Angstrom's truthful `isConnected`) and the last
+    /// cloud update is older than ``staleGrace``. While `isConnected` is true the
+    /// data *is* current — any change is pushed, and 1.2.0 re-fetches the
+    /// dashboard on every reconnect — so no time-based check is needed then.
     var isDataStale: Bool {
-        guard connection == .connected, let lastUpdateAt else { return false }
-        return Date().timeIntervalSince(lastUpdateAt) > Self.staleThreshold
+        guard connection == .connected, let device else { return false }
+        if device.isConnected { return false }
+        guard let last = device.lastUpdateAt else { return true }
+        return Date().timeIntervalSince(last) > Self.staleGrace
     }
 
     /// Periodic REST reconcile. Runs for the app's lifetime; no-ops unless a
@@ -391,7 +392,6 @@ final class MachineController {
         guard let device, connection == .connected else { return }
         do {
             try await device.refreshDashboard()
-            lastUpdateAt = Date()
         } catch LaMarzoccoError.authenticationFailed {
             connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
         } catch {
@@ -454,22 +454,6 @@ final class MachineController {
         if regained {
             log.notice("network reachability regained — forcing a fresh connection")
             ensureFreshConnection()
-        }
-    }
-
-    /// Stamp ``lastUpdateAt`` whenever the live dashboard changes — a websocket
-    /// push, a poll, or an optimistic command update — so staleness is measured
-    /// against real data arrival, not just poll ticks. Observation fires its
-    /// `onChange` once per tracked change, so we re-arm each time.
-    private func trackDashboardFreshness() {
-        withObservationTracking {
-            _ = device?.dashboard
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.lastUpdateAt = Date()
-                self.trackDashboardFreshness()
-            }
         }
     }
 }

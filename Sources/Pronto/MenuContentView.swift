@@ -248,18 +248,19 @@ struct MenuContentView: View {
         }
     }
 
-    /// Small connection badge. Green "Live" when the websocket subscription is up
-    /// and data is current; amber "Stale" when connected but no fresh update has
-    /// arrived within the staleness window (the honest signal — `isLive` alone can
-    /// stay `true` over a silently-dead socket); dimmed "Polling" when live updates
-    /// aren't active but recent data exists.
+    /// Small connection badge. Green "Live" when the websocket is *actually*
+    /// connected (`isSocketConnected` — real socket health, not just the
+    /// subscription, which stays nominally active across silent drops); amber
+    /// "Stale" when the socket is down and the last-known data has outlived the
+    /// grace window; dimmed "Polling" otherwise (socket down/reconnecting, or
+    /// live updates never started, with data still recent).
     @ViewBuilder private var liveIndicator: some View {
         if controller.isDataStale {
             Label("Stale", systemImage: "clock.badge.exclamationmark")
                 .font(.caption2)
                 .foregroundStyle(.orange)
-                .help("No fresh status recently — reconnecting. Showing last-known state.")
-        } else if controller.isLive {
+                .help(staleHelp)
+        } else if controller.isSocketConnected {
             Label("Live", systemImage: "bolt.horizontal.fill")
                 .font(.caption2)
                 .foregroundStyle(.green)
@@ -270,6 +271,14 @@ struct MenuContentView: View {
                 .foregroundStyle(.secondary)
                 .help("Not receiving live updates; showing last fetched status.")
         }
+    }
+
+    private var staleHelp: String {
+        if let last = controller.lastUpdateAt {
+            let minutes = max(1, Int(Date().timeIntervalSince(last) / 60))
+            return "Connection lost — last update \(minutes)m ago. Reconnecting…"
+        }
+        return "Connection lost — reconnecting…"
     }
 
     // MARK: Helpers
