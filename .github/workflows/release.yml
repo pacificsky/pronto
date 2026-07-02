@@ -199,3 +199,30 @@ jobs:
             --title "Pronto $GITHUB_REF_NAME" \
             --notes-file notes.md \
             --generate-notes
+
+      # Update the Homebrew tap (pacificsky/homebrew-tap) so `brew upgrade`
+      # picks up this release. Skipped with a warning when HOMEBREW_TAP_TOKEN
+      # (fine-grained PAT, contents:write on homebrew-tap only) isn't set; any
+      # other failure fails the job loudly — the GitHub Release is already
+      # published at this point, so nothing is lost, but a stale cask must be
+      # visible. Casks/pronto.rb in the tap is fully generated from
+      # packaging/pronto.rb.tmpl; the contents API needs the existing blob SHA
+      # on update (omitting it is only valid for the first-ever create).
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew cask update"
+            exit 0
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA256="$(shasum -a 256 "Pronto-${GITHUB_REF_NAME}.zip" | cut -d' ' -f1)"
+          ./packaging/render-cask.sh "$VERSION" "$SHA256" > "$RUNNER_TEMP/pronto.rb"
+          EXISTING_SHA="$(gh api repos/pacificsky/homebrew-tap/contents/Casks/pronto.rb --jq .sha 2>/dev/null || true)"
+          gh api --method PUT repos/pacificsky/homebrew-tap/contents/Casks/pronto.rb \
+            -f message="Update pronto to v${VERSION}" \
+            -f content="$(base64 -i "$RUNNER_TEMP/pronto.rb")" \
+            ${EXISTING_SHA:+-f sha="$EXISTING_SHA"} \
+            --jq '.commit.sha'
+          echo "Tap updated for v${VERSION}"
