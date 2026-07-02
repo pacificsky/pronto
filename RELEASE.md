@@ -40,8 +40,11 @@ Watch progress under the repo's **Actions** tab.
    version + zip sha256 and pushes `Casks/pronto.rb` to
    [pacificsky/homebrew-tap](https://github.com/pacificsky/homebrew-tap).
    Skipped (with a warning) if the `HOMEBREW_TAP_TOKEN` secret is unset; a
-   push failure fails the job (the GitHub Release is already published by
-   then — fix and re-run just this step, or render + push by hand).
+   push failure fails the job. The GitHub Release is already published by
+   then; recover by hand — `./packaging/render-cask.sh <version> <sha256 of
+   the published zip>` and push the output to the tap as `Casks/pronto.rb`.
+   (Job re-runs can't reach this step: release creation fails on an existing
+   release, and a rebuilt zip's sha256 wouldn't match the published asset.)
 
 ## One-time setup (already done)
 
@@ -55,7 +58,9 @@ These only matter if the repo is recreated or settings drift:
   *Settings → Actions → General → Workflow permissions* is set to **Read and write**.
 - `HOMEBREW_TAP_TOKEN` repo secret: fine-grained PAT scoped to
   `pacificsky/homebrew-tap` only, permission **Contents: Read and write**.
-  Used by the "Update Homebrew cask" step.
+  Used by the "Update Homebrew cask" step. Fine-grained PATs expire (max 1
+  year; this one was created 2026-07-01) — rotate it before then, and a 401
+  from the "Update Homebrew cask" step means the token needs regenerating.
 
 ## Code signing & notarization
 
