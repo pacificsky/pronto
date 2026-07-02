@@ -47,8 +47,8 @@ struct MenuContentView: View {
         }
         .padding(14)
         .frame(width: 280)
-        // Refresh the moment the popover opens, so the state you're looking at is
-        // current regardless of the background reconcile phase.
+        // Reconcile when the popover opens — but only if it could matter (socket
+        // down or data past its freshness window); healthy opens cost no traffic.
         .onAppear { controller.refreshNow() }
     }
 

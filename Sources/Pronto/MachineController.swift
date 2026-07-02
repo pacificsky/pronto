@@ -87,6 +87,13 @@ final class MachineController {
     /// honestly stale.
     static let staleGrace: TimeInterval = 2 * 60
 
+    /// Popover-open refreshes are skipped while the socket is connected and the
+    /// last update is younger than this. With a healthy socket the data is current
+    /// by construction (pushes + reconnect refresh), so most opens cost nothing;
+    /// past this age a refresh guards the one gap the socket can't see — a push
+    /// the cloud silently never sent.
+    static let viewRefreshAge: TimeInterval = 10 * 60
+
     private(set) var connection: ConnectionState = .notConfigured
     private(set) var machines: [Machine] = []
     private(set) var selectedSerial: String?
@@ -381,10 +388,16 @@ final class MachineController {
         }
     }
 
-    /// Fire an immediate reconcile — e.g. when the popover opens — so the moment
-    /// the user looks, state is fresh regardless of where the background poll is in
-    /// its cycle. Cheap and safe to call repeatedly; no-ops unless connected.
+    /// Conditional reconcile for when the user looks (popover open). No-op while
+    /// the socket is connected and the data is younger than ``viewRefreshAge`` —
+    /// in that state the dashboard is current by construction, and refreshing on
+    /// every open would be pointless API traffic. Fetches only when it could
+    /// plausibly matter: socket down, nothing loaded yet, or data old enough that
+    /// a silently-dropped push could be hiding behind a healthy-looking socket.
     func refreshNow() {
+        guard let device, connection == .connected else { return }
+        if device.isConnected, let last = device.lastUpdateAt,
+           Date().timeIntervalSince(last) < Self.viewRefreshAge { return }
         Task { await reconcile() }
     }
 
