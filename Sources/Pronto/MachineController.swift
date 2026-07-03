@@ -110,7 +110,10 @@ final class MachineController {
     /// current by the websocket; `power` is derived from it.
     private(set) var device: LaMarzoccoMachine?
 
-    @ObservationIgnored private var config = Persistence.loadConfig()
+    // `lazy` so constructing the controller doesn't touch the Keychain — the read
+    // happens at `bootstrap()` in the app, and unit tests that never bootstrap
+    // stay free of Keychain ACL prompts.
+    @ObservationIgnored private lazy var config = Persistence.loadConfig()
     @ObservationIgnored private var client: LaMarzoccoCloudClient?
     @ObservationIgnored private var commandTask: Task<Void, Never>?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
@@ -207,9 +210,12 @@ final class MachineController {
 
     /// Whether the user has opted in to anonymous crash reporting (Settings).
     /// Toggling starts/stops Sentry immediately — see ``CrashReporting``.
-    var crashReportingEnabled: Bool {
-        get { Persistence.crashReportingEnabled }
-        set { CrashReporting.setEnabled(newValue) }
+    ///
+    /// Stored (not computed over UserDefaults) so the `@Observable` macro tracks
+    /// it — a computed property reading Persistence directly fires no observation,
+    /// so the Settings Toggle would persist the click but never re-render.
+    var crashReportingEnabled: Bool = Persistence.crashReportingEnabled {
+        didSet { CrashReporting.setEnabled(crashReportingEnabled) }
     }
 
     /// (Re)build the client from stored credentials, load machines, and bring the
