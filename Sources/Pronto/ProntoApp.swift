@@ -14,8 +14,13 @@ struct ProntoApp: App {
             // The menu bar renders this as a monochrome template image (tints are
             // dropped), so state is conveyed by markedly different glyphs:
             // a full cup when ready, a thermometer while heating, a sleep symbol
-            // in standby.
-            Image(systemName: menuBarSymbol)
+            // in standby, and a cup with an exclamation badge when the machine
+            // itself is offline from the cloud.
+            if controller.isMachineOffline {
+                Image(nsImage: Self.offlineMenuBarImage)
+            } else {
+                Image(systemName: menuBarSymbol)
+            }
         }
         .menuBarExtraStyle(.window)
 
@@ -24,6 +29,38 @@ struct ProntoApp: App {
                 .environment(controller)
         }
     }
+
+    /// Outline cup with a small exclamation badge at the top-right — "machine
+    /// offline". Composed by hand because no `cup.and.saucer.badge.exclamationmark`
+    /// SF Symbol exists; drawn as a template image so the menu bar renders it
+    /// correctly in light/dark/monochrome.
+    static let offlineMenuBarImage: NSImage = {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let badgeConfig = NSImage.SymbolConfiguration(pointSize: 8, weight: .heavy)
+        guard
+            let cup = NSImage(systemSymbolName: "cup.and.saucer",
+                              accessibilityDescription: "Machine offline")?
+                .withSymbolConfiguration(config),
+            let badge = NSImage(systemSymbolName: "exclamationmark",
+                                accessibilityDescription: nil)?
+                .withSymbolConfiguration(badgeConfig)
+        else {
+            // Both symbols ship with macOS 11+; if resolution somehow fails,
+            // fall back to the plain outline cup rather than crash.
+            return NSImage(systemSymbolName: "cup.and.saucer",
+                           accessibilityDescription: "Machine offline") ?? NSImage()
+        }
+        let size = NSSize(width: cup.size.width + 2, height: cup.size.height + 4)
+        let image = NSImage(size: size, flipped: false) { _ in
+            cup.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            badge.draw(at: NSPoint(x: size.width - badge.size.width,
+                                   y: size.height - badge.size.height),
+                       from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
 
     /// Symbol reflecting the selected machine's power state. Distinct shapes
     /// (not just fill) so the state reads at a glance in monochrome.

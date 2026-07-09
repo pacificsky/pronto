@@ -86,8 +86,10 @@ by one `@MainActor` view-model.
 
 - **`ProntoApp.swift`** — `MenuBarExtra` + `Settings` scenes; accessory activation.
   The menu-bar icon reflects the selected machine's power via *distinct glyphs*
-  (filled cup = on, `powersleep` = standby, outline cup = unknown) — **not** color,
-  which the menu bar templates away to monochrome.
+  (filled cup = on, `powersleep` = standby, outline cup = unknown, outline cup +
+  exclamation badge = machine offline — a hand-composed template image, since no
+  such SF Symbol exists) — **not** color, which the menu bar templates away to
+  monochrome.
 - **`MachineController.swift`** — the brain. `@MainActor @Observable` view-model
   (the Observation framework, not `ObservableObject`) owning `ConnectionState`, the
   machine list, and the live device. It keeps a shared `LaMarzoccoCloudClient` (an
@@ -104,7 +106,13 @@ by one `@MainActor` view-model.
   only `LaMarzoccoError.authenticationFailed` downgrades the connection. The
   connection is owned by `MachineController.shared` and brought up at **launch** from
   `AppDelegate.applicationDidFinishLaunching` — its lifetime is the app's, not the
-  popover's.
+  popover's. `isMachineOffline` (the dashboard envelope's `connected` flag, via
+  `dashboard.machine.isConnected`) reports the **machine's own** link to LM's cloud —
+  orthogonal to our socket health: when the machine is physically off / unplugged /
+  off Wi-Fi, the cloud serves a husk dashboard (`connected: false`, widgets reduced
+  to a frozen `CMMachineStatus`), so the mode-derived `power` is last-known, not
+  live. The UI shows "Machine offline" instead of trusting it and suppresses the
+  power button (`setPower` also guards).
 - **Verifying the live socket.** It does **not** show up in `lsof -iTCP`: the cloud
   host is behind CloudFront and the connection rides QUIC / Network.framework, not a
   classic TCP socket FD — so `lsof` is a false negative, not a bug. To confirm it's

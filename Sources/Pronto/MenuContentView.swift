@@ -26,7 +26,9 @@ struct MenuContentView: View {
             case .failed(let message):
                 failed(message)
             case .connected:
-                if controller.selectedMachine?.supportsPower ?? true {
+                if controller.isMachineOffline {
+                    machineOfflineNote
+                } else if controller.selectedMachine?.supportsPower ?? true {
                     if !controller.boilers.isEmpty { boilerSection }
                     controls
                 } else {
@@ -188,6 +190,30 @@ struct MenuContentView: View {
         }
     }
 
+    /// Shown instead of the power button when the machine itself has dropped off
+    /// La Marzocco's cloud (physically switched off, unplugged, or off Wi-Fi).
+    /// The cloud can't reach it, so no remote action is possible — and the mode
+    /// it reports is frozen at last-known, which the header no longer shows.
+    private var machineOfflineNote: some View {
+        Label {
+            Text(machineOfflineDetail)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var machineOfflineDetail: String {
+        if let last = controller.machineLastConnected {
+            let time = last.formatted(date: .omitted, time: .shortened)
+            return "The machine hasn’t been reachable since \(time). Check its power switch and Wi-Fi."
+        }
+        return "The machine isn’t reachable by La Marzocco’s cloud. Check its power switch and Wi-Fi."
+    }
+
     /// Shown for devices that report status but can't be powered remotely
     /// (e.g. grinders). The current state still appears in the header.
     private var statusOnlyNote: some View {
@@ -302,6 +328,9 @@ struct MenuContentView: View {
         if let target = controller.pendingTarget {
             return target.isOn ? "Turning on…" : "Turning off…"
         }
+        // Offline trumps the mode-derived state: the cloud's last-known mode is
+        // frozen at whatever the machine reported before it vanished.
+        if controller.isMachineOffline { return "Machine offline" }
         let canPower = controller.selectedMachine?.supportsPower ?? true
         switch controller.power {
         case .on:
@@ -319,6 +348,7 @@ struct MenuContentView: View {
     }
 
     private var statusColor: Color {
+        if controller.isMachineOffline { return .secondary }
         switch controller.power {
         case .on: return controller.isWarmingUp ? .orange : .green
         case .off: return .secondary
