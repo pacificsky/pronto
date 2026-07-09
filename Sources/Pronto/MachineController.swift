@@ -166,11 +166,14 @@ final class MachineController {
     /// the machine is gone. The cloud then serves a husk dashboard — top-level
     /// `connected: false`, widgets reduced to a frozen `CMMachineStatus` — so the
     /// mode-derived ``power`` is last-known, not live, and must not be trusted.
-    var isMachineOffline: Bool { device?.dashboard?.machine.isConnected == false }
+    /// (Angstrom 1.3.0 keeps the flag current across websocket pushes too, but a
+    /// disconnect is still only *discovered* by a REST refresh — see the
+    /// `isMachineConnected` docs.)
+    var isMachineOffline: Bool { device?.isMachineConnected == false }
 
     /// When the machine last (re)connected to the cloud, from the dashboard
     /// envelope — shown as "last connected" context while offline.
-    var machineLastConnected: Date? { device?.dashboard?.machine.connectionDate }
+    var machineLastConnected: Date? { device?.machineLastConnectionDate }
 
     /// Whether the live websocket subscription is active. Stays `true` across
     /// transient socket drops (the client auto-reconnects underneath).
