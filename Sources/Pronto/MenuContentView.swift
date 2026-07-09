@@ -15,6 +15,49 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
+            HStack(alignment: .center, spacing: 12) {
+                contentSection
+
+                // The cloud's color-accurate render of the selected device — a
+                // real layout element (not a faded watermark), so it stays crisp
+                // and never collides with the header or footer. Bigger in the
+                // roomy controls layout, smaller beside compact notes.
+                if let deviceImage {
+                    Image(nsImage: deviceImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: showsControls ? 84 : 56)
+                        .opacity(0.9)
+                }
+            }
+
+            Divider()
+            footer
+        }
+        .padding(14)
+        .frame(width: 280)
+        // Reconcile when the popover opens — but only if it could matter (socket
+        // down or data past its freshness window); healthy opens cost no traffic.
+        .onAppear { controller.refreshNow() }
+        .task(id: controller.selectedMachine?.imageURL) {
+            guard let url = controller.selectedMachine?.imageURL else {
+                deviceImage = nil
+                return
+            }
+            deviceImage = await MachineImageCache.image(for: url)
+        }
+    }
+
+    @State private var deviceImage: NSImage?
+
+    /// Whether the roomy power-controls layout is showing (vs a compact note).
+    private var showsControls: Bool {
+        controller.connection == .connected && !controller.isMachineOffline
+            && (controller.selectedMachine?.supportsPower ?? true)
+    }
+
+    @ViewBuilder private var contentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             switch controller.connection {
             case .notConfigured:
                 notConfigured
@@ -43,15 +86,8 @@ struct MenuContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Divider()
-            footer
         }
-        .padding(14)
-        .frame(width: 280)
-        // Reconcile when the popover opens — but only if it could matter (socket
-        // down or data past its freshness window); healthy opens cost no traffic.
-        .onAppear { controller.refreshNow() }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Sections

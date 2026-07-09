@@ -1,13 +1,13 @@
-# Machine watermark in the popup
+# Machine image in the popup
 
-**Date:** 2026-07-08
-**Status:** Approved
+**Date:** 2026-07-08 (revised 2026-07-09 after visual iteration)
+**Status:** Implemented
 
 ## What
 
 Render the La Marzocco cloud's color-accurate image of the selected device
-(coffee machine or grinder) as a faded background watermark in the popup's
-bottom-right — a personal touch showing *your* machine in *its* color.
+(coffee machine or grinder) in the popup — a personal touch showing *your*
+machine in *its* color.
 
 The cloud's `/things` response carries an `imageUrl` per device (e.g.
 `https://lion.lamarzocco.io/img/thing-model/list/lineamicra/lineamicra-1-c-bianco.png`)
@@ -34,14 +34,25 @@ memory cache live on `@MainActor`.
 
 ### `MenuContentView` changes
 
-- `.background(alignment: .bottomTrailing)` on the popup content: the image
-  `scaledToFit`, ~110pt tall, tucked toward the bottom-right, opacity ~0.12
-  (tuned by eye in light and dark mode), `allowsHitTesting(false)`.
+- The image is a **real layout element**, not a background watermark: an
+  `HStack` pairs the content section (below the header, above the divider)
+  with the render at ~0.9 opacity — 84pt tall beside the roomy controls
+  layout (boiler rows + power button), 56pt beside compact notes (machine
+  offline, status-only, errors).
 - Loaded via `.task(id: controller.selectedMachine?.imageURL)` into local
-  `@State` — switching machines in the picker swaps the watermark; no
-  selected machine (not configured) means no watermark.
+  `@State` — switching machines in the picker swaps the image; no selected
+  machine (not configured) means no image.
 - Shown whenever a machine is selected, including "machine offline" — the
   image is identity, not status.
+
+**Why not a watermark:** the original design (faded image behind the content,
+bottom-right, ~0.12 opacity) was tried first and iterated twice. The popup is
+too short and dense for it — in compact states the image either collided with
+the header/Live badge or shrank to an unreadable smudge. Four placements were
+rendered side-by-side with an offline SwiftUI `ImageRenderer` mock harness
+(full-background watermark, dedicated space, header thumbnail,
+watermark-only-when-tall); dedicated space at full opacity read best in every
+state and was chosen by eye.
 
 ## Privacy
 
