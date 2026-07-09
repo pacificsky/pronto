@@ -25,6 +25,19 @@ jobs:
           sudo xcode-select -s "$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -1)/Contents/Developer"
           swift --version
 
+      # Same guard as release.yml: SwiftPM's parallel binary-artifact downloads
+      # (sentry-cocoa ships 7 xcframeworks) intermittently race its artifact
+      # cache. Resolve up front with retries so the build never hits it.
+      - name: Resolve dependencies (retry SwiftPM artifact-cache races)
+        run: |
+          for attempt in 1 2 3; do
+            if swift package resolve; then exit 0; fi
+            echo "::warning::swift package resolve failed (attempt $attempt); clearing SwiftPM artifact cache and retrying…"
+            rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts
+            sleep 5
+          done
+          exit 1
+
       - name: Build
         run: swift build
 

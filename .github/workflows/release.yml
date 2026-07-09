@@ -82,6 +82,22 @@ jobs:
           echo "Signing identity: $IDENTITY"
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
+      # SwiftPM's parallel download of sentry-cocoa's many binary xcframeworks
+      # intermittently races its own artifact cache ("… already exists in file
+      # system"), killing the build before anything real happens (it sank two
+      # v0.7.0 attempts back-to-back). Resolving up front with a retry — clearing
+      # the artifact cache between attempts — makes the actual build start from
+      # fully-downloaded artifacts.
+      - name: Resolve dependencies (retry SwiftPM artifact-cache races)
+        run: |
+          for attempt in 1 2 3; do
+            if swift package resolve; then exit 0; fi
+            echo "::warning::swift package resolve failed (attempt $attempt); clearing SwiftPM artifact cache and retrying…"
+            rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts
+            sleep 5
+          done
+          exit 1
+
       - name: Build app bundle (Developer ID signed)
         env:
           # Baked into the bundle for opt-in crash reporting. Empty if the secret
