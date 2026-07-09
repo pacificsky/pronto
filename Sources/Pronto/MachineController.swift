@@ -135,7 +135,9 @@ final class MachineController {
     /// `BrewingMode`, but the boilers can still be `.heatingUp` for minutes after —
     /// these rows surface that gap.
     var boilers: [BoilerReadiness] {
-        guard power == .on, let dash = device?.dashboard else { return [] }
+        // Offline: any boiler widgets still present are frozen last-known values,
+        // not live heating state (and `isWarmingUp` must not pulse from them).
+        guard power == .on, !isMachineOffline, let dash = device?.dashboard else { return [] }
         var result: [BoilerReadiness] = []
         if let coffee = dash.coffeeBoiler {
             result.append(.init(kind: .coffee, status: coffee.status, readyAt: coffee.readyStartTime))
@@ -157,6 +159,18 @@ final class MachineController {
         let latest = boilers.compactMap { $0.status == .heatingUp ? $0.readyAt : nil }.max()
         return latest.flatMap(BoilerReadiness.minutes(until:))
     }
+
+    /// Whether the **machine itself** is offline from La Marzocco's cloud —
+    /// physically switched off, unplugged, or off Wi-Fi. Distinct from our own
+    /// socket health (``isSocketConnected``): our link can be perfectly live while
+    /// the machine is gone. The cloud then serves a husk dashboard — top-level
+    /// `connected: false`, widgets reduced to a frozen `CMMachineStatus` — so the
+    /// mode-derived ``power`` is last-known, not live, and must not be trusted.
+    var isMachineOffline: Bool { device?.dashboard?.machine.isConnected == false }
+
+    /// When the machine last (re)connected to the cloud, from the dashboard
+    /// envelope — shown as "last connected" context while offline.
+    var machineLastConnected: Date? { device?.dashboard?.machine.connectionDate }
 
     /// Whether the live websocket subscription is active. Stays `true` across
     /// transient socket drops (the client auto-reconnects underneath).
@@ -299,6 +313,13 @@ final class MachineController {
         // Only coffee machines accept the power command; grinders manage their own
         // standby. The UI hides the buttons, but guard here too.
         guard machine.supportsPower else { return }
+        // A cloud command can't reach an offline machine — it would only hang
+        // until `commandTimedOut`. The UI replaces the button with a note, but
+        // guard against the race where a push flips `connected` mid-click.
+        guard !isMachineOffline else {
+            actionError = "The machine is offline — check its power switch and Wi-Fi."
+            return
+        }
         let target: PowerState = on ? .on : .off
 
         busy = true
