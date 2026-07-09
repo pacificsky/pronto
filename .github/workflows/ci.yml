@@ -25,6 +25,24 @@ jobs:
           sudo xcode-select -s "$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -1)/Contents/Developer"
           swift --version
 
+      # Same guard as release.yml: downloading sentry-cocoa's 7 binary
+      # xcframeworks is flaky (transient CDN 504s), and the partial state a dead
+      # download leaves behind makes naive retries fail instantly with "… already
+      # exists in file system". Resolve up front with retries + state cleanup.
+      - name: Resolve dependencies (retry flaky binary-artifact downloads)
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if swift package resolve; then exit 0; fi
+            echo "::warning::swift package resolve failed (attempt $attempt); clearing SwiftPM state and retrying…"
+            # Clear BOTH the shared artifact cache and the workspace state: a
+            # download that dies mid-flight (e.g. a 504 from GitHub's asset CDN)
+            # leaves partial state behind, and later attempts then fail instantly
+            # with "… already exists in file system" unless both are gone.
+            rm -rf .build ~/Library/Caches/org.swift.swiftpm/artifacts
+            sleep $((attempt * 15))
+          done
+          exit 1
+
       - name: Build
         run: swift build
 

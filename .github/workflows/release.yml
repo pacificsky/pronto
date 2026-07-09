@@ -82,6 +82,27 @@ jobs:
           echo "Signing identity: $IDENTITY"
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
+      # Downloading sentry-cocoa's 7 binary xcframeworks is the build's flakiest
+      # moment: a transient failure from GitHub's asset CDN (observed as 504s)
+      # kills the build before anything real happens, and the partial state it
+      # leaves behind makes naive retries fail instantly with "… already exists
+      # in file system" (this sank two v0.7.0 attempts back-to-back). Resolve up
+      # front with retries + full state cleanup so the actual build starts from
+      # fully-downloaded artifacts.
+      - name: Resolve dependencies (retry flaky binary-artifact downloads)
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if swift package resolve; then exit 0; fi
+            echo "::warning::swift package resolve failed (attempt $attempt); clearing SwiftPM state and retrying…"
+            # Clear BOTH the shared artifact cache and the workspace state: a
+            # download that dies mid-flight (e.g. a 504 from GitHub's asset CDN)
+            # leaves partial state behind, and later attempts then fail instantly
+            # with "… already exists in file system" unless both are gone.
+            rm -rf .build ~/Library/Caches/org.swift.swiftpm/artifacts
+            sleep $((attempt * 15))
+          done
+          exit 1
+
       - name: Build app bundle (Developer ID signed)
         env:
           # Baked into the bundle for opt-in crash reporting. Empty if the secret
