@@ -1,26 +1,43 @@
 import SwiftUI
 import Angstrom
 
+/// Which Settings tab is active — drives both the `TabView` selection and the
+/// window title, so the title bar tracks the active tab like the design.
+private enum SettingsTab: String {
+    case account = "Account"
+    case machine = "Machine"
+    case privacy = "Privacy"
+}
+
 /// Settings window: Account (credentials + connection), Machine (live boiler
 /// controls), and Privacy (crash reporting) tabs, with the version footer
-/// visible on every tab.
+/// visible on every tab. Grouped-inset-card look throughout, per the design
+/// handoff — every tab uses `.formStyle(.grouped)` rather than hand-built cards.
 struct SettingsView: View {
+    @State private var selection: SettingsTab = .account
+
     var body: some View {
-        VStack(spacing: 12) {
-            TabView {
+        VStack(spacing: 8) {
+            TabView(selection: $selection) {
                 AccountSettingsTab()
                     .tabItem { Label("Account", systemImage: "person.circle") }
+                    .tag(SettingsTab.account)
                 MachineSettingsView()
-                    .padding(.top, 8)
                     .tabItem { Label("Machine", systemImage: "dial.medium") }
+                    .tag(SettingsTab.machine)
                 PrivacySettingsTab()
                     .tabItem { Label("Privacy", systemImage: "hand.raised") }
+                    .tag(SettingsTab.privacy)
             }
             versionFooter
+                .padding(.bottom, 12)
         }
-        .padding(20)
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
+        // Grouped `Form` is List-backed and has no intrinsic height, so the
+        // window needs an explicit frame (unlike the old `.columns` form, which
+        // could size itself via `.fixedSize`). 600pt wide per the design; 440pt
+        // tall comfortably fits the Machine tab, the tallest of the three.
+        .frame(width: 600, height: 440)
+        .navigationTitle(selection.rawValue)
     }
 
     /// App version footer so users can see (and copy, for bug reports) exactly
@@ -31,7 +48,7 @@ struct SettingsView: View {
         let info = Bundle.main.infoDictionary
         let version = (info?["CFBundleShortVersionString"] as? String) ?? "unknown"
         Text("Pronto \(version)")
-            .font(.caption)
+            .font(.caption2)
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -39,7 +56,6 @@ struct SettingsView: View {
 }
 
 /// Account tab: La Marzocco credentials + connection status + machine picker.
-/// Content unchanged from the pre-tab Settings window.
 private struct AccountSettingsTab: View {
     @Environment(MachineController.self) private var controller
 
@@ -54,8 +70,8 @@ private struct AccountSettingsTab: View {
                 credentialsSection
             }
 
-            Section("Status") {
-                LabeledContent("Connection") {
+            Section("Connection") {
+                LabeledContent("Status") {
                     connectionLabel
                 }
                 if !controller.machines.isEmpty {
@@ -70,25 +86,33 @@ private struct AccountSettingsTab: View {
                 }
             }
         }
-        .formStyle(.columns)
-        .padding(.top, 8)
+        .formStyle(.grouped)
     }
 
     /// Shown once credentials are stored: the account is read-only here. To change
     /// the password, sign out and sign back in.
     @ViewBuilder
     private var signedInSection: some View {
-        Section("La Marzocco Account") {
+        Section("Account") {
             LabeledContent("Signed in as") {
-                Text(controller.username).textSelection(.enabled)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("La Marzocco Account")
+                    Text(controller.username)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .textSelection(.enabled)
             }
 
-            Button(role: .destructive) {
-                controller.signOut()
-                email = ""
-                password = ""
-            } label: {
-                Text("Sign Out & Clear Credentials")
+            HStack {
+                Spacer()
+                Button(role: .destructive) {
+                    controller.signOut()
+                    email = ""
+                    password = ""
+                } label: {
+                    Text("Sign Out & Clear Credentials")
+                }
             }
         }
     }
@@ -96,7 +120,7 @@ private struct AccountSettingsTab: View {
     /// Shown when no credentials are stored (fresh install or after sign-out).
     @ViewBuilder
     private var credentialsSection: some View {
-        Section("La Marzocco Account") {
+        Section("Account") {
             TextField("Email", text: $email)
                 .textContentType(.username)
             SecureField("Password", text: $password)
@@ -149,12 +173,13 @@ private struct PrivacySettingsTab: View {
                     get: { controller.crashReportingEnabled },
                     set: { controller.crashReportingEnabled = $0 }
                 ))
+                .toggleStyle(.switch)
+                .tint(.green)
                 Text("Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.columns)
-        .padding(.top, 8)
+        .formStyle(.grouped)
     }
 }

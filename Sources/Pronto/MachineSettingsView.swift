@@ -62,30 +62,40 @@ struct MachineSettingsForm: View {
         Form {
             switch state {
             case .notConnected:
-                note("Connect your La Marzocco account in the Account tab to control the machine.")
+                Section {
+                    note("Connect your La Marzocco account in the Account tab to control the machine.")
+                }
             case .machineOffline:
-                note("The machine isn’t reachable by La Marzocco’s cloud. Check its power switch and Wi-Fi.")
+                Section {
+                    note("The machine isn’t reachable by La Marzocco’s cloud. Check its power switch and Wi-Fi.")
+                }
             case .loading:
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Loading machine settings…").foregroundStyle(.secondary)
+                Section {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading machine settings…").foregroundStyle(.secondary)
+                    }
                 }
             case .noControls:
-                note("This device has no remotely adjustable boiler settings.")
+                Section {
+                    note("This device has no remotely adjustable boiler settings.")
+                }
             case .controls(let brew, let steam):
                 if let brew { brewSection(brew) }
                 if let steam { steamSection(steam) }
             }
 
             if let error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Section {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-        .formStyle(.columns) // match SettingsView
+        .formStyle(.grouped)
     }
 
     // MARK: Sections
@@ -131,6 +141,8 @@ struct MachineSettingsForm: View {
                     get: { steam.enabled },
                     set: { onSteamEnabled($0) }
                 ))
+                .toggleStyle(.switch)
+                .tint(.green)
                 .disabled(busy)
                 Text("Turn off when you’re only pulling shots.")
                     .font(.caption)
