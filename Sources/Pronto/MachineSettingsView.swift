@@ -99,24 +99,27 @@ struct MachineSettingsForm: View {
             // a degenerate range disables stepping (single-point range) instead of
             // crashing the Settings window.
             let bounds = brew.min <= brew.max ? brew.min...brew.max : brew.target...brew.target
-            Stepper(value: Binding(
-                get: { shown },
-                set: { onBrewTemperature(BrewTemperature.clamped($0, min: brew.min, max: brew.max, step: brew.step)) }
-            ), in: bounds, step: brew.step) {
-                LabeledContent("Target temperature") {
-                    HStack(spacing: 6) {
-                        if pendingBrewTarget != nil, busy {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(BrewTemperature.display(celsius: shown))
-                            .monospacedDigit()
+            LabeledContent("Target temperature") {
+                HStack(spacing: 8) {
+                    if pendingBrewTarget != nil, busy {
+                        ProgressView().controlSize(.small)
                     }
+                    Text(BrewTemperature.display(celsius: shown))
+                        .monospacedDigit()
+                    Stepper(value: Binding(
+                        get: { shown },
+                        set: { onBrewTemperature(BrewTemperature.clamped($0, min: brew.min, max: brew.max, step: brew.step)) }
+                    ), in: bounds, step: brew.step) {
+                        EmptyView()
+                    }
+                    .labelsHidden()
                 }
             }
             Text(String(format: "%.0f–%.0f °C in %.1f° steps, as reported by the machine.",
                         brew.min, brew.max, brew.step))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -132,6 +135,7 @@ struct MachineSettingsForm: View {
                 Text("Turn off when you’re only pulling shots.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let level = steam.level {
                 Picker("Steam level", selection: Binding(
