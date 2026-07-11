@@ -1,62 +1,26 @@
 import SwiftUI
 import Angstrom
 
-/// Connection settings: La Marzocco account credentials + machine selection.
+/// Settings window: Account (credentials + connection), Machine (live boiler
+/// controls), and Privacy (crash reporting) tabs, with the version footer
+/// visible on every tab.
 struct SettingsView: View {
-    @Environment(MachineController.self) private var controller
-
-    @State private var email = ""
-    @State private var password = ""
-
     var body: some View {
         VStack(spacing: 12) {
-            Form {
-                if controller.hasCredentials {
-                    signedInSection
-                } else {
-                    credentialsSection
-                }
-
-                Section("Status") {
-                    LabeledContent("Connection") {
-                        connectionLabel
-                    }
-                    if !controller.machines.isEmpty {
-                        Picker("Machine", selection: Binding(
-                            get: { controller.selectedSerial ?? "" },
-                            set: { controller.selectMachine($0) }
-                        )) {
-                            ForEach(controller.machines) { machine in
-                                Text("\(machine.displayName) — \(machine.modelName)").tag(machine.serialNumber)
-                            }
-                        }
-                    }
-                }
-
-                privacySection
+            TabView {
+                AccountSettingsTab()
+                    .tabItem { Label("Account", systemImage: "person.circle") }
+                MachineSettingsView()
+                    .padding(.top, 8)
+                    .tabItem { Label("Machine", systemImage: "dial.medium") }
+                PrivacySettingsTab()
+                    .tabItem { Label("Privacy", systemImage: "hand.raised") }
             }
-            .formStyle(.columns)
-
             versionFooter
         }
         .padding(20)
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Opt-in, anonymous crash reporting. Defaults off. The caption states the
-    /// privacy guarantee that `SensitiveDataScrubber` enforces.
-    @ViewBuilder
-    private var privacySection: some View {
-        Section("Privacy") {
-            Toggle("Send anonymous crash reports", isOn: Binding(
-                get: { controller.crashReportingEnabled },
-                set: { controller.crashReportingEnabled = $0 }
-            ))
-            Text("Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 
     /// App version footer so users can see (and copy, for bug reports) exactly
@@ -71,6 +35,43 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// Account tab: La Marzocco credentials + connection status + machine picker.
+/// Content unchanged from the pre-tab Settings window.
+private struct AccountSettingsTab: View {
+    @Environment(MachineController.self) private var controller
+
+    @State private var email = ""
+    @State private var password = ""
+
+    var body: some View {
+        Form {
+            if controller.hasCredentials {
+                signedInSection
+            } else {
+                credentialsSection
+            }
+
+            Section("Status") {
+                LabeledContent("Connection") {
+                    connectionLabel
+                }
+                if !controller.machines.isEmpty {
+                    Picker("Machine", selection: Binding(
+                        get: { controller.selectedSerial ?? "" },
+                        set: { controller.selectMachine($0) }
+                    )) {
+                        ForEach(controller.machines) { machine in
+                            Text("\(machine.displayName) — \(machine.modelName)").tag(machine.serialNumber)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.columns)
+        .padding(.top, 8)
     }
 
     /// Shown once credentials are stored: the account is read-only here. To change
@@ -133,5 +134,27 @@ struct SettingsView: View {
                 .foregroundStyle(.red)
                 .font(.caption)
         }
+    }
+}
+
+/// Privacy tab: opt-in, anonymous crash reporting. Defaults off. The caption
+/// states the privacy guarantee that `SensitiveDataScrubber` enforces.
+private struct PrivacySettingsTab: View {
+    @Environment(MachineController.self) private var controller
+
+    var body: some View {
+        Form {
+            Section("Privacy") {
+                Toggle("Send anonymous crash reports", isOn: Binding(
+                    get: { controller.crashReportingEnabled },
+                    set: { controller.crashReportingEnabled = $0 }
+                ))
+                Text("Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.columns)
+        .padding(.top, 8)
     }
 }
