@@ -83,7 +83,7 @@ final class MachineSettingsRenderTests: XCTestCase {
         for (name, form) in states {
             let height = measured.first { $0.0 == name }!.1
             try autoreleasepool {
-                guard let png = Self.renderPNG(form.frame(width: 600, height: height)) else {
+                guard let png = Self.renderPNG(form.frame(width: 600, height: height), height: height) else {
                     XCTFail("render failed for \(name)")
                     return
                 }
