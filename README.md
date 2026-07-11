@@ -41,6 +41,9 @@ That's it! Pick your machine and you'll see **Turn On** / **Turn Off** buttons.
 - Click the cup icon any time to turn your machine on or off.
 - The menu-bar icon changes shape, and a colored dot in the popover shows whether your machine is currently on.
 - Have more than one machine? Choose which one from the menu.
+- Set the brew boiler's target temperature (within the machine's own range).
+- Turn the steam boiler on or off — skip it when you're only pulling shots.
+- Set the steam level (1/2/3) on machines that support it (Linea Micra / Mini R).
 
 ## Good to know
 
