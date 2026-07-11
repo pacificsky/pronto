@@ -35,7 +35,14 @@ struct SettingsView: View {
         // Grouped `Form` is List-backed and has no intrinsic height, so the
         // window needs an explicit frame (unlike the old `.columns` form, which
         // could size itself via `.fixedSize`). 600pt wide per the design; 440pt
-        // tall comfortably fits the Machine tab, the tallest of the three.
+        // tall is measured, not eyeballed: MachineSettingsRenderTests hosts each
+        // Machine-tab state in a real NSHostingView/NSWindow and reads its
+        // `fittingSize.height` at width 600. The tallest tab (Machine, `error`
+        // state — both boiler cards plus the inline error card) measures 361pt;
+        // the chrome this VStack adds around a tab (tab bar + spacing + version
+        // footer) measures 67pt on top of that — 428pt total, which 440pt already
+        // covers with a 12pt margin. See MachineSettingsRenderTests for the
+        // full per-state measurements and arithmetic.
         .frame(width: 600, height: 440)
         .navigationTitle(selection.rawValue)
     }
