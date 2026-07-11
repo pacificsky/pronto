@@ -25,7 +25,13 @@ struct MachineSettingsView: View {
         if controller.isMachineOffline { return .machineOffline }
         let brew = controller.brewBoilerSetting
         let steam = controller.steamBoilerSetting
-        if brew == nil && steam == nil { return .noControls }
+        if brew == nil && steam == nil {
+            // Both nil is also the transient state right after launch/machine-switch
+            // while the dashboard hasn't loaded yet — don't claim "no controls" for
+            // a machine we haven't heard from.
+            if controller.device?.dashboard == nil { return .loading }
+            return .noControls
+        }
         return .controls(brew: brew, steam: steam)
     }
 }
@@ -35,6 +41,10 @@ struct MachineSettingsForm: View {
     enum MachineState {
         case notConnected
         case machineOffline
+        /// Connected but the dashboard hasn't loaded yet — distinct from
+        /// `.noControls` so a Micra owner doesn't briefly read a wrong claim about
+        /// their machine while the first dashboard fetch is still in flight.
+        case loading
         /// Connected but nothing controllable (grinders: no boiler widgets).
         case noControls
         case controls(brew: BrewBoilerSetting?, steam: SteamBoilerSetting?)
@@ -55,6 +65,11 @@ struct MachineSettingsForm: View {
                 note("Connect your La Marzocco account in the Account tab to control the machine.")
             case .machineOffline:
                 note("The machine isn’t reachable by La Marzocco’s cloud. Check its power switch and Wi-Fi.")
+            case .loading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading machine settings…").foregroundStyle(.secondary)
+                }
             case .noControls:
                 note("This device has no remotely adjustable boiler settings.")
             case .controls(let brew, let steam):
@@ -80,10 +95,14 @@ struct MachineSettingsForm: View {
             // Show the in-flight edit while the debounce/confirmation runs, so
             // clicks feel instant; fall back to the machine-confirmed target.
             let shown = pendingBrewTarget ?? brew.target
+            // Cloud bounds are untrusted input: `ClosedRange` traps if min > max, so
+            // a degenerate range disables stepping (single-point range) instead of
+            // crashing the Settings window.
+            let bounds = brew.min <= brew.max ? brew.min...brew.max : brew.target...brew.target
             Stepper(value: Binding(
                 get: { shown },
                 set: { onBrewTemperature(BrewTemperature.clamped($0, min: brew.min, max: brew.max, step: brew.step)) }
-            ), in: brew.min...brew.max, step: brew.step) {
+            ), in: bounds, step: brew.step) {
                 LabeledContent("Target temperature") {
                     HStack(spacing: 6) {
                         if pendingBrewTarget != nil, busy {

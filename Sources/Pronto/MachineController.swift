@@ -348,6 +348,13 @@ final class MachineController {
 
     func selectMachine(_ serial: String) {
         guard serial != selectedSerial else { return }
+        // A debounced/in-flight machine-settings edit must never outlive the
+        // machine selection it was aimed at — otherwise a temperature queued on
+        // machine A can fire against the freshly rebuilt `device` for machine B.
+        brewTempTask?.cancel(); brewTempTask = nil
+        steamTask?.cancel(); steamTask = nil
+        pendingBrewTarget = nil
+        machineSettingError = nil
         selectedSerial = serial
         Persistence.saveSelectedSerial(serial)
         startLive()
@@ -473,7 +480,10 @@ final class MachineController {
     /// error copy ("temperature", "steam", "steam level").
     private func runMachineSetting(_ what: String,
                                    _ command: (LaMarzoccoMachine) async throws -> Void) async {
-        guard let device else { return }
+        guard let device else {
+            machineSettingError = "The machine connection is being re-established — try again."
+            return
+        }
         // A cloud command can't reach an offline machine — the UI hides the
         // controls, but guard against a push flipping `connected` mid-click.
         guard !isMachineOffline else {

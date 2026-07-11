@@ -54,4 +54,11 @@ final class MachineSettingsControllerTests: XCTestCase {
         XCTAssertNil(controller.brewBoilerSetting)
         XCTAssertNil(controller.steamBoilerSetting)
     }
+
+    func testSelectMachineDropsPendingBrewEdit() {
+        let controller = MachineController()
+        controller.queueBrewTemperature(94.5)
+        controller.selectMachine("OTHER-SERIAL")
+        XCTAssertNil(controller.pendingBrewTarget, "a debounced edit must not follow a machine switch")
+    }
 }

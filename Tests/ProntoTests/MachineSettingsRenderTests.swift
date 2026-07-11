@@ -40,6 +40,8 @@ final class MachineSettingsRenderTests: XCTestCase {
                                     pendingBrewTarget: nil, busy: false, error: nil)),
             ("no-controls", .init(state: .noControls,
                                   pendingBrewTarget: nil, busy: false, error: nil)),
+            ("loading", .init(state: .loading,
+                              pendingBrewTarget: nil, busy: false, error: nil)),
         ]
 
         for (name, form) in states {
