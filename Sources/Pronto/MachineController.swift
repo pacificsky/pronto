@@ -56,6 +56,25 @@ struct BoilerReadiness: Identifiable {
     }
 }
 
+/// Brew-boiler target temperature with the machine-reported bounds, for the
+/// Settings Machine tab. All values are °C, straight off the dashboard widget —
+/// the UI never invents a range.
+struct BrewBoilerSetting: Equatable {
+    let target: Double
+    let min: Double
+    let max: Double
+    let step: Double
+}
+
+/// Steam-boiler switches for the Settings Machine tab. `level` is `nil` on
+/// machines whose steam boiler has no 1/2/3 level control (e.g. the GS3 family,
+/// which reports `steamBoilerTemperature` instead).
+struct SteamBoilerSetting: Equatable {
+    let enabled: Bool
+    let enabledSupported: Bool
+    let level: SteamLevel?
+}
+
 /// Observable view-model that owns the cloud client and the selected machine's
 /// live state.
 ///
@@ -106,6 +125,22 @@ final class MachineController {
     /// next command starts.
     private(set) var actionError: String?
 
+    /// How long the brew-temperature stepper waits after the last click before
+    /// sending one coalesced command — rapid steps 94→96 cost a single API call.
+    /// Static `var` (not `let`) only so tests can shrink it.
+    static var brewTemperatureDebounce: Duration = .seconds(1)
+
+    /// The brew temperature the debounced stepper is waiting to send (or awaiting
+    /// confirmation of). Non-nil while an edit is in flight — the stepper displays
+    /// it so clicks feel instant without lying about confirmed machine state.
+    private(set) var pendingBrewTarget: Double?
+    /// True while a Machine-tab command awaits the machine's confirmation frame.
+    private(set) var machineSettingBusy = false
+    /// Set when a Machine-tab command was rejected or couldn't be confirmed.
+    /// Cleared when the next edit starts. Kept separate from `actionError` so
+    /// popover and Settings errors can't clobber each other.
+    private(set) var machineSettingError: String?
+
     /// The live, observable view of the selected machine. Its `dashboard` is kept
     /// current by the websocket; `power` is derived from it.
     private(set) var device: LaMarzoccoMachine?
@@ -116,6 +151,8 @@ final class MachineController {
     @ObservationIgnored private lazy var config = Persistence.loadConfig()
     @ObservationIgnored private var client: LaMarzoccoCloudClient?
     @ObservationIgnored private var commandTask: Task<Void, Never>?
+    @ObservationIgnored private var brewTempTask: Task<Void, Never>?
+    @ObservationIgnored private var steamTask: Task<Void, Never>?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
@@ -158,6 +195,38 @@ final class MachineController {
     var readyEtaMinutes: Int? {
         let latest = boilers.compactMap { $0.status == .heatingUp ? $0.readyAt : nil }.max()
         return latest.flatMap(BoilerReadiness.minutes(until:))
+    }
+
+    /// Brew-boiler target + machine-reported bounds from the live dashboard, or
+    /// `nil` when there's nothing controllable (not connected, machine offline,
+    /// or no coffee-boiler widget — e.g. grinders).
+    var brewBoilerSetting: BrewBoilerSetting? {
+        guard connection == .connected, !isMachineOffline,
+              let coffee = device?.dashboard?.coffeeBoiler else { return nil }
+        return BrewBoilerSetting(target: coffee.targetTemperature,
+                                 min: coffee.targetTemperatureMin,
+                                 max: coffee.targetTemperatureMax,
+                                 step: coffee.targetTemperatureStep)
+    }
+
+    /// Steam-boiler switches from the live dashboard. Level-based machines
+    /// (Micra / Mini R) report `steamBoilerLevel`; the GS3 family reports
+    /// `steamBoilerTemperature` (toggle only, `level` = nil). `nil` when there's
+    /// no steam boiler to control.
+    var steamBoilerSetting: SteamBoilerSetting? {
+        guard connection == .connected, !isMachineOffline,
+              let dash = device?.dashboard else { return nil }
+        if let steam = dash.steamBoilerLevel {
+            return SteamBoilerSetting(enabled: steam.enabled,
+                                      enabledSupported: steam.enabledSupported,
+                                      level: steam.targetLevelSupported ? steam.targetLevel : nil)
+        }
+        if let steam = dash.steamBoilerTemperature {
+            return SteamBoilerSetting(enabled: steam.enabled,
+                                      enabledSupported: steam.enabledSupported,
+                                      level: nil)
+        }
+        return nil
     }
 
     /// Whether the **machine itself** is offline from La Marzocco's cloud —
@@ -286,12 +355,17 @@ final class MachineController {
 
     func signOut() {
         commandTask?.cancel(); commandTask = nil
+        brewTempTask?.cancel(); brewTempTask = nil
+        steamTask?.cancel(); steamTask = nil
         liveTask?.cancel(); liveTask = nil
         let previous = device
         device = nil
         Task { await previous?.stop() }
         pendingTarget = nil
         actionError = nil
+        pendingBrewTarget = nil
+        machineSettingBusy = false
+        machineSettingError = nil
         Persistence.clearAll()
         config = Persistence.loadConfig()
         client = nil
@@ -347,6 +421,79 @@ final class MachineController {
             actionError = "The machine rejected the \(on ? "on" : "off") command (\(status))."
         } catch {
             actionError = (error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    // MARK: - Machine settings commands (Settings › Machine tab)
+
+    /// Debounced brew-temperature edit. Every stepper click lands here; the
+    /// command goes out once, ``brewTemperatureDebounce`` after the last click.
+    func queueBrewTemperature(_ celsius: Double) {
+        pendingBrewTarget = celsius
+        machineSettingError = nil
+        brewTempTask?.cancel()
+        brewTempTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.brewTemperatureDebounce)
+            guard !Task.isCancelled else { return }
+            await self?.sendBrewTemperature(celsius)
+        }
+    }
+
+    private func sendBrewTemperature(_ celsius: Double) async {
+        defer {
+            // A newer click may have re-queued while this send was in flight —
+            // only clear the pending display if it's still ours.
+            if pendingBrewTarget == celsius { pendingBrewTarget = nil }
+        }
+        await runMachineSetting("temperature") {
+            try await $0.setCoffeeTargetTemperature(celsius: celsius)
+        }
+    }
+
+    /// Steam toggle — immediate send; a toggle is a single discrete action.
+    func setSteamEnabled(_ on: Bool) {
+        machineSettingError = nil
+        steamTask?.cancel()
+        steamTask = Task { [weak self] in
+            await self?.runMachineSetting("steam") { try await $0.setSteam(on: on) }
+        }
+    }
+
+    /// Steam level 1/2/3 — immediate send, same as the toggle.
+    func setSteamLevel(_ level: SteamLevel) {
+        machineSettingError = nil
+        steamTask?.cancel()
+        steamTask = Task { [weak self] in
+            await self?.runMachineSetting("steam level") { try await $0.setSteamTargetLevel(level) }
+        }
+    }
+
+    /// Shared plumbing for Machine-tab commands: offline guard, busy flag, and
+    /// the same error mapping as the power path. `what` names the setting in
+    /// error copy ("temperature", "steam", "steam level").
+    private func runMachineSetting(_ what: String,
+                                   _ command: (LaMarzoccoMachine) async throws -> Void) async {
+        guard let device else { return }
+        // A cloud command can't reach an offline machine — the UI hides the
+        // controls, but guard against a push flipping `connected` mid-click.
+        guard !isMachineOffline else {
+            machineSettingError = "The machine is offline — check its power switch and Wi-Fi."
+            return
+        }
+        machineSettingBusy = true
+        defer { machineSettingBusy = false }
+        do {
+            try await command(device)
+        } catch LaMarzoccoError.authenticationFailed {
+            connection = .failed(LaMarzoccoError.authenticationFailed.errorDescription ?? "Auth failed")
+        } catch LaMarzoccoError.commandTimedOut {
+            machineSettingError = "Couldn’t confirm the \(what) change in time."
+        } catch let LaMarzoccoError.commandFailed(status, _) {
+            machineSettingError = "The machine rejected the \(what) change (\(status))."
+        } catch is CancellationError {
+            // Superseded by a newer edit — not an error.
+        } catch {
+            machineSettingError = (error as? LaMarzoccoError)?.errorDescription ?? error.localizedDescription
         }
     }
 
