@@ -12,7 +12,9 @@ private enum SettingsTab: String {
 /// Settings window: Account (credentials + connection), Machine (live boiler
 /// controls), and Privacy (crash reporting) tabs, with the version footer
 /// visible on every tab. Grouped-inset-card look throughout, per the design
-/// handoff — every tab uses `.formStyle(.grouped)` rather than hand-built cards.
+/// handoff — each tab hand-lays its own ``SettingsGroup`` cards (rather than
+/// `.formStyle(.grouped)`, which is List-backed and has no intrinsic height)
+/// so the toolbar-style `TabView` can auto-resize the window per tab.
 struct SettingsView: View {
     @State private var selection: SettingsTab = .account
 
@@ -32,18 +34,12 @@ struct SettingsView: View {
             versionFooter
                 .padding(.bottom, 12)
         }
-        // Grouped `Form` is List-backed and has no intrinsic height, so the
-        // window needs an explicit frame (unlike the old `.columns` form, which
-        // could size itself via `.fixedSize`). 600pt wide per the design; 440pt
-        // tall is measured, not eyeballed: MachineSettingsRenderTests hosts each
-        // Machine-tab state in a real NSHostingView/NSWindow and reads its
-        // `fittingSize.height` at width 600. The tallest tab (Machine, `error`
-        // state — both boiler cards plus the inline error card) measures 361pt;
-        // the chrome this VStack adds around a tab (tab bar + spacing + version
-        // footer) measures 67pt on top of that — 428pt total, which 440pt already
-        // covers with a 12pt margin. See MachineSettingsRenderTests for the
-        // full per-state measurements and arithmetic.
-        .frame(width: 600, height: 440)
+        // Every tab's content now has intrinsic height (plain VStacks, no
+        // List-backed Form), so the window can size itself per tab: fixed
+        // 480pt width (narrowed from the design's 600pt per user feedback),
+        // free height via `fixedSize`.
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
         .navigationTitle(selection.rawValue)
     }
 
@@ -70,18 +66,80 @@ private struct AccountSettingsTab: View {
     @State private var password = ""
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 20) {
             if controller.hasCredentials {
-                signedInSection
+                signedInGroup
             } else {
-                credentialsSection
+                credentialsGroup
             }
+            connectionGroup
+        }
+        .settingsTabPadding()
+    }
 
-            Section("Connection") {
+    /// Shown once credentials are stored: the account is read-only here. To change
+    /// the password, sign out and sign back in.
+    private var signedInGroup: some View {
+        SettingsGroup("Account") {
+            SettingsRow {
+                LabeledContent("Signed in as") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("La Marzocco Account")
+                        Text(controller.username)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .textSelection(.enabled)
+                }
+            }
+            SettingsRow {
+                HStack {
+                    Spacer()
+                    Button(role: .destructive) {
+                        controller.signOut()
+                        email = ""
+                        password = ""
+                    } label: {
+                        Text("Sign Out & Clear Credentials")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shown when no credentials are stored (fresh install or after sign-out).
+    private var credentialsGroup: some View {
+        SettingsGroup("Account") {
+            SettingsRow {
+                TextField("Email", text: $email)
+                    .textContentType(.username)
+            }
+            SettingsRow(help: "The same email and password you use in the official La Marzocco app. Stored in your macOS Keychain.") {
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+            }
+            SettingsRow {
+                Button {
+                    controller.saveCredentials(username: email.trimmingCharacters(in: .whitespaces),
+                                               password: password)
+                } label: {
+                    Text("Save & Connect")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(email.isEmpty || password.isEmpty)
+            }
+        }
+    }
+
+    private var connectionGroup: some View {
+        SettingsGroup("Connection") {
+            SettingsRow {
                 LabeledContent("Status") {
                     connectionLabel
                 }
-                if !controller.machines.isEmpty {
+            }
+            if !controller.machines.isEmpty {
+                SettingsRow {
                     Picker("Machine", selection: Binding(
                         get: { controller.selectedSerial ?? "" },
                         set: { controller.selectMachine($0) }
@@ -92,58 +150,6 @@ private struct AccountSettingsTab: View {
                     }
                 }
             }
-        }
-        .formStyle(.grouped)
-    }
-
-    /// Shown once credentials are stored: the account is read-only here. To change
-    /// the password, sign out and sign back in.
-    @ViewBuilder
-    private var signedInSection: some View {
-        Section("Account") {
-            LabeledContent("Signed in as") {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("La Marzocco Account")
-                    Text(controller.username)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .textSelection(.enabled)
-            }
-
-            HStack {
-                Spacer()
-                Button(role: .destructive) {
-                    controller.signOut()
-                    email = ""
-                    password = ""
-                } label: {
-                    Text("Sign Out & Clear Credentials")
-                }
-            }
-        }
-    }
-
-    /// Shown when no credentials are stored (fresh install or after sign-out).
-    @ViewBuilder
-    private var credentialsSection: some View {
-        Section("Account") {
-            TextField("Email", text: $email)
-                .textContentType(.username)
-            SecureField("Password", text: $password)
-                .textContentType(.password)
-            Text("The same email and password you use in the official La Marzocco app. Stored in your macOS Keychain.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Button {
-                controller.saveCredentials(username: email.trimmingCharacters(in: .whitespaces),
-                                           password: password)
-            } label: {
-                Text("Save & Connect")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(email.isEmpty || password.isEmpty)
         }
     }
 
@@ -174,19 +180,18 @@ private struct PrivacySettingsTab: View {
     @Environment(MachineController.self) private var controller
 
     var body: some View {
-        Form {
-            Section("Privacy") {
-                Toggle("Send anonymous crash reports", isOn: Binding(
-                    get: { controller.crashReportingEnabled },
-                    set: { controller.crashReportingEnabled = $0 }
-                ))
-                .toggleStyle(.switch)
-                .tint(.green)
-                Text("Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsGroup("Privacy") {
+                SettingsRow(help: "Helps fix crashes. Never includes your La Marzocco account or machine details — only the crash itself. Off by default.") {
+                    Toggle("Send anonymous crash reports", isOn: Binding(
+                        get: { controller.crashReportingEnabled },
+                        set: { controller.crashReportingEnabled = $0 }
+                    ))
+                    .toggleStyle(.switch)
+                    .tint(.green)
+                }
             }
         }
-        .formStyle(.grouped)
+        .settingsTabPadding()
     }
 }

@@ -13,6 +13,12 @@ import AppKit
 @MainActor
 final class MachineSettingsRenderTests: XCTestCase {
 
+    /// Matches `SettingsView`'s window width, so what's rendered here is
+    /// exactly what the real Machine tab lays out at (including its own
+    /// `.settingsTabPadding()`, since `MachineSettingsForm.body` applies that
+    /// itself).
+    private static let windowWidth: CGFloat = 480
+
     func testRenderMockStates() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["RENDER_MOCKS"] == "1")
         let dir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["RENDER_DIR"] ?? "/tmp",
@@ -45,45 +51,15 @@ final class MachineSettingsRenderTests: XCTestCase {
                               pendingBrewTarget: nil, busy: false, error: nil)),
         ]
 
-        // Measure each state's *own* fitting height instead of guessing a
-        // shared render height — this is also the evidence behind the
-        // `SettingsView` window frame (see the arithmetic below and
-        // `SettingsView.swift`'s `.frame` comment).
-        var measured: [(String, CGFloat)] = []
+        // Every state has intrinsic height now (plain VStacks, no List-backed
+        // Form), so — unlike the old fixed-440pt window — each state simply
+        // renders at its own fitting height; there's no shared frame height
+        // to reconcile across tabs/states anymore.
         for (name, form) in states {
-            let height = autoreleasepool {
-                Self.measuredFittingHeight(form)
-            }
-            measured.append((name, height))
-            print("[MachineSettingsRenderTests] \(name) form fitting height: \(height)pt")
-        }
-
-        let tallest = measured.max { $0.1 < $1.1 }!
-        print("[MachineSettingsRenderTests] tallest form state: \(tallest.0) at \(tallest.1)pt")
-
-        // Chrome (tab bar + inter-view spacing + version footer) is
-        // state-independent, but `SettingsView`'s per-tab structs are
-        // `private` to SettingsView.swift and unreachable from this test
-        // file even with @testable import. Instead of duplicating their
-        // internals, `ChromeProbe` below reproduces `SettingsView.body`'s
-        // non-form scaffolding modifier-for-modifier around the *real*
-        // `MachineSettingsForm` for the tallest state, so subtracting that
-        // same form's bare fitting height isolates exactly the chrome
-        // `SettingsView` adds around whichever tab is showing.
-        guard let tallestForm = states.first(where: { $0.0 == tallest.0 })?.1 else {
-            XCTFail("missing form for tallest state \(tallest.0)")
-            return
-        }
-        let composedHeight = Self.measuredFittingHeight(ChromeProbe(machineTab: tallestForm))
-        let chrome = composedHeight - tallest.1
-        print("[MachineSettingsRenderTests] composed (chrome + \(tallest.0) form) fitting height: \(composedHeight)pt")
-        print("[MachineSettingsRenderTests] chrome (tab bar + spacing + footer): \(chrome)pt")
-        print("[MachineSettingsRenderTests] tallest form (\(tallest.1)pt) + chrome (\(chrome)pt) = \(tallest.1 + chrome)pt")
-
-        for (name, form) in states {
-            let height = measured.first { $0.0 == name }!.1
             try autoreleasepool {
-                guard let png = Self.renderPNG(form.frame(width: 600, height: height), height: height) else {
+                let height = Self.measuredFittingHeight(form)
+                print("[MachineSettingsRenderTests] \(name) form fitting height: \(height)pt")
+                guard let png = Self.renderPNG(form, height: height) else {
                     XCTFail("render failed for \(name)")
                     return
                 }
@@ -92,53 +68,14 @@ final class MachineSettingsRenderTests: XCTestCase {
         }
     }
 
-    /// Structural clone of `SettingsView.body`'s non-form chrome — the
-    /// `VStack(spacing: 8) { TabView { ... }; versionFooter.padding(.bottom, 12) }`
-    /// wrapper — parameterized on the Machine tab's content so the *real*
-    /// `MachineSettingsForm` for a given state can be measured inside it. Kept
-    /// modifier-for-modifier identical to `SettingsView.body` (same VStack
-    /// spacing, same three `tabItem`s, same footer font/padding) so the
-    /// measured chrome matches the real window; the Account/Privacy tabs are
-    /// stand-ins since their content doesn't affect the Machine tab's chrome
-    /// (the tab bar's height is fixed by AppKit regardless of which tab is
-    /// selected or what the other tabs contain).
-    private struct ChromeProbe<MachineTab: View>: View {
-        let machineTab: MachineTab
-
-        var body: some View {
-            VStack(spacing: 8) {
-                TabView(selection: .constant(1)) {
-                    Color.clear
-                        .tabItem { Label("Account", systemImage: "person.circle") }
-                        .tag(0)
-                    machineTab
-                        .tabItem { Label("Machine", systemImage: "dial.medium") }
-                        .tag(1)
-                    Color.clear
-                        .tabItem { Label("Privacy", systemImage: "hand.raised") }
-                        .tag(2)
-                }
-                Text("Pronto 0.0.0")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 12)
-            }
-        }
-    }
-
-    /// Reads the `NSHostingView`'s ideal height for `view` fixed at `width`
-    /// (min 200, matching the render floor below). Same real-window
-    /// requirement as `renderPNG` — a grouped `Form` is List-backed and
-    /// doesn't lay out (or report a correct `fittingSize`) without being
-    /// attached to a real window — so this shares that workaround, just with
-    /// a generously tall initial frame (2000pt) so no row is clipped out of
-    /// the layout pass before `fittingSize` is read.
+    /// Reads the `NSHostingView`'s ideal height for `view` fixed at
+    /// `windowWidth`. Hosted in a real (offscreen, borderless) `NSWindow`
+    /// with a generously tall initial frame (2000pt) so no row is clipped
+    /// out of the layout pass before `fittingSize` is read.
     @MainActor
-    private static func measuredFittingHeight<V: View>(_ view: V, width: CGFloat = 600) -> CGFloat {
-        let hosting = NSHostingView(rootView: view.frame(width: width))
-        hosting.frame = NSRect(x: 0, y: 0, width: width, height: 2000)
+    private static func measuredFittingHeight<V: View>(_ view: V) -> CGFloat {
+        let hosting = NSHostingView(rootView: view.frame(width: windowWidth))
+        hosting.frame = NSRect(x: 0, y: 0, width: windowWidth, height: 2000)
         let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.contentView = hosting
@@ -151,23 +88,28 @@ final class MachineSettingsRenderTests: XCTestCase {
         return max(height, 200)
     }
 
-    /// `ImageRenderer` alone produces a blank image for `.formStyle(.grouped)`
-    /// content: a grouped `Form` is List-backed, and List/Table content doesn't
-    /// lay out its rows without being attached to a real window (verified with a
-    /// throwaway repro — `ImageRenderer` on a bare `Form { Section {...} }
-    /// .formStyle(.grouped)` renders blank, while the same content hosted in a
-    /// real (offscreen, borderless) `NSWindow` renders correctly). So route
-    /// through an actual window instead of `ImageRenderer`.
+    /// Renders `view` at `windowWidth`×`height` via a real (offscreen,
+    /// borderless) `NSWindow` + `NSHostingView`, rather than `ImageRenderer`
+    /// directly — kept from the grouped-`Form` era, where `ImageRenderer`
+    /// alone produced a blank image for List-backed content; this path is
+    /// proven to work for both, so it stays even though the content is now
+    /// plain `VStack`s with no List underneath.
     @MainActor
-    private static func renderPNG<V: View>(_ view: V, width: CGFloat = 600, height: CGFloat = 500) -> Data? {
-        let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+    private static func renderPNG<V: View>(_ view: V, height: CGFloat) -> Data? {
+        // Top-align: the real window has no extra height beyond its content
+        // (`fixedSize` sizes it exactly), so this only matters when a short
+        // state's measured height is clamped up to the 200pt floor below —
+        // without it, `.frame`'s default `.center` alignment would misleadingly
+        // pad the mock symmetrically instead of matching production's
+        // flush-to-top layout.
+        let hosting = NSHostingView(rootView: view.frame(width: windowWidth, height: height, alignment: .top))
+        hosting.frame = NSRect(x: 0, y: 0, width: windowWidth, height: height)
         let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.contentView = hosting
         window.orderFrontRegardless()
         hosting.layoutSubtreeIfNeeded()
-        // Give the List/Form a runloop turn to finish laying out its rows.
+        // Give the view a runloop turn to finish laying out.
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 
         guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
