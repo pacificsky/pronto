@@ -153,18 +153,25 @@ by one `@MainActor` view-model.
   `Tests/ProntoTests` (the repo's only test target; CI runs `swift test`), which seeds
   an event with private data in every field and asserts none survives. Never set a
   Sentry user or put secrets in log/error/breadcrumb messages.
-- **`MenuContentView.swift` / `SettingsView.swift`** — the popover (status + a
-  single state-aware power button) and the credentials/machine-selection window. The
-  power button shows the one available action — its label/colour/action follow the
-  current state (`Turn On` sage / `Turn Off` amber / disabled while a command
-  reconciles); current state itself is conveyed by the header dot + status line + the
-  menu-bar glyph, plus a **Live** badge in the header when the websocket subscription
-  is active. Devices where `Machine.supportsPower == false` (grinders) render
-  **status-only**: the button is replaced by a note and `setPower` is guarded. Views
-  observe the controller via `@Environment(MachineController.self)` (Observation, not
+- **`MenuContentView.swift` / `SettingsView.swift` / `MachineSettingsView.swift`**
+  — the popover (status + a single state-aware power button) and the Settings
+  window (Account / Machine / Privacy tabs). The Machine tab holds live boiler
+  settings: brew target temperature (machine-reported min/max/step, °C with °F
+  hint, debounced ~1s in the controller so stepping sends one command), steam
+  on/off, and steam level 1/2/3 (`steamBoilerLevel` machines only; GS3-family
+  gets the toggle, grinders neither). `MachineSettingsForm` is value-driven so
+  every state renders offline (`RENDER_MOCKS=1 swift test --filter
+  MachineSettingsRenderTests`). The power button shows the one available action —
+  its label/colour/action follow the current state (`Turn On` sage / `Turn Off`
+  amber / disabled while a command reconciles); current state itself is conveyed
+  by the header dot + status line + the menu-bar glyph, plus a **Live** badge in
+  the header when the websocket subscription is active. Devices where
+  `Machine.supportsPower == false` (grinders) render **status-only**: the button
+  is replaced by a note and `setPower` is guarded. Views observe the controller
+  via `@Environment(MachineController.self)` (Observation, not
   `@EnvironmentObject`). The live connection is brought up at **launch** (see
-  `AppDelegate`), so the menu-bar icon shows `.unknown` only until the first status
-  arrives; after that the websocket keeps it current.
+  `AppDelegate`), so the menu-bar icon shows `.unknown` only until the first
+  status arrives; after that the websocket keeps it current.
 
 ## Constraints & scope
 
@@ -172,8 +179,10 @@ by one `@MainActor` view-model.
   guarded to 14.0 or CI will break.
 - Cloud-only: the old local LAN HTTP API (port 8081) is gone on current firmware;
   Bluetooth LE is out of scope. Don't reintroduce a local-HTTP path.
-- Scope is power on/off + live status only — steam boiler, temperature, and
-  schedules are intentionally excluded. Grinders (Pico/Swan) are **status-only**:
+- Scope is power on/off, live status, and boiler settings (brew temperature,
+  steam on/off, steam level on machines that support it — Settings › Machine
+  tab) — schedules are intentionally excluded. Grinders (Pico/Swan) are
+  **status-only**:
   La Marzocco's cloud has no grinder power command, so they show state but no
   controls.
 - End-to-end testing needs real La Marzocco account credentials (entered in
