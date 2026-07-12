@@ -125,23 +125,32 @@ struct MachineSettingsForm: View {
                         get: { steam.enabled },
                         set: { onSteamEnabled($0) }
                     ))
-                    .toggleStyle(.switch)
+                    .toggleStyle(FullWidthToggleStyle())
                     .tint(.green)
                     .disabled(busy)
                 }
             }
             if let level = steam.level {
                 SettingsRow {
-                    Picker("Steam level", selection: Binding(
-                        get: { level },
-                        set: { onSteamLevel($0) }
-                    )) {
-                        Text("1").tag(SteamLevel.level1)
-                        Text("2").tag(SteamLevel.level2)
-                        Text("3").tag(SteamLevel.level3)
+                    // A bare `Picker(.segmented)` doesn't push its segments to
+                    // the trailing edge on its own — unlike `LabeledContent`/
+                    // `Toggle`, its internal layout just hugs the label, so
+                    // wrap it in `LabeledContent` to get the same
+                    // label-leading / control-trailing split as every other row.
+                    LabeledContent("Steam level") {
+                        Picker("Steam level", selection: Binding(
+                            get: { level },
+                            set: { onSteamLevel($0) }
+                        )) {
+                            Text("1").tag(SteamLevel.level1)
+                            Text("2").tag(SteamLevel.level2)
+                            Text("3").tag(SteamLevel.level3)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .disabled(busy || !steam.enabled)
                     }
-                    .pickerStyle(.segmented)
-                    .disabled(busy || !steam.enabled)
                 }
             }
             if busy, pendingBrewTarget == nil {

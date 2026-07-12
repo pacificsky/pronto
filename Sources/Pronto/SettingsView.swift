@@ -187,7 +187,7 @@ private struct PrivacySettingsTab: View {
                         get: { controller.crashReportingEnabled },
                         set: { controller.crashReportingEnabled = $0 }
                     ))
-                    .toggleStyle(.switch)
+                    .toggleStyle(FullWidthToggleStyle())
                     .tint(.green)
                 }
             }

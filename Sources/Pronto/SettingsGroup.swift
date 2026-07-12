@@ -25,7 +25,7 @@ struct SettingsGroup: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
             }
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows.indices, id: \.self) { index in
                     if index > 0 {
                         Divider().padding(.leading, 16)
@@ -33,8 +33,17 @@ struct SettingsGroup: View {
                     rows[index]
                 }
             }
+            // Outside a List, the card sizes to fit its content by default.
+            // Force it to span whatever width the tab offers so every card in
+            // a tab (e.g. Coffee Boiler vs. Steam Boiler) lines up uniformly,
+            // instead of each hugging its own widest row.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .settingsCardBackground()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Single choke point: every `LabeledContent` row in every card, in
+        // all three tabs, gets the List-row label/control split for free.
+        .labeledContentStyle(FullWidthLabeledContentStyle())
     }
 }
 
@@ -55,6 +64,16 @@ struct SettingsRow<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             content
+                // Merely proposing more width here isn't enough on its own:
+                // `LabeledContent`'s `.automatic` style (and any hand-laid
+                // `HStack { label; Spacer(); control }`) only spread label
+                // and control to opposite edges once actually *offered* the
+                // full row width. This is the one place every row across all
+                // three tabs passes through, so it's the single spot that
+                // needs the width proposal — the label/control split itself
+                // comes from `FullWidthLabeledContentStyle` below (applied
+                // once, in ``SettingsGroup``) and `FullWidthToggleStyle`.
+                .frame(maxWidth: .infinity, alignment: .leading)
             if let help {
                 Text(help)
                     .font(.caption)
@@ -62,8 +81,42 @@ struct SettingsRow<Content: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+}
+
+/// Makes `LabeledContent` spread its label and content to opposite edges
+/// outside a List/Form. `LabeledContentStyle.automatic` only does that
+/// *inside* a List/Form; standalone (our hand-laid cards) it just hugs its
+/// label + content with a small fixed gap, ignoring however much width its
+/// ancestors offer it. An explicit `Spacer` is the only way to get the
+/// List-row look back — applied once here via `.labeledContentStyle` (see
+/// ``SettingsGroup``) so every `LabeledContent` row in every tab gets it for
+/// free, no call-site changes needed.
+struct FullWidthLabeledContentStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            configuration.label
+            Spacer(minLength: 16)
+            configuration.content
+        }
+    }
+}
+
+/// Makes a switch `Toggle` push its label leading / switch trailing outside
+/// a List/Form, for the same reason as ``FullWidthLabeledContentStyle``:
+/// `.switch` alone hugs its label + control instead of spreading them.
+struct FullWidthToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 16) {
+            configuration.label
+            Spacer(minLength: 16)
+            Toggle(isOn: configuration.$isOn) { EmptyView() }
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
     }
 }
 
