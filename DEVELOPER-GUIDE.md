@@ -41,7 +41,7 @@ sent via `POST /things/{serial}/command/CoffeeMachineChangeMode`.
 
 The cloud protocol — auth and the machine client — lives in the
 [**Angstrom**](https://github.com/pacificsky/angstrom) Swift package, which Pronto
-depends on (pinned to **1.0.0** in `Package.resolved`). Angstrom owns the entire
+depends on (the exact version is pinned in `Package.resolved`). Angstrom owns the entire
 wire protocol: it generates a per-install identity (`InstallationKey`), registers
 it, signs in, and signs every request — so Pronto only ever calls `client.connect()`
 plus the typed read/command methods. The endpoint shapes, the auth crypto, and how
