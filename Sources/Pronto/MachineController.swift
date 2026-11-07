@@ -49,6 +49,7 @@ struct BoilerReadiness: Identifiable {
             return "Heating up"
         case .ready: return "Ready"
         case .standby: return "Standby"
+        case .eco: return "Eco"
         case .off: return "Off"
         case .noWater: return "No water"
         case .other(let v): return v
